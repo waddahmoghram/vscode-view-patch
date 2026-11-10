@@ -58,8 +58,9 @@ The prepared version is 0.2.0. Nothing is published by building or installing it
    ```
 
 1. The Publish workflow first calls the shared verification workflow. Publishing waits for all Linux, macOS, Windows,
-   and oldest-supported-editor tests and packaging to pass. It then checks the tag against `package.json`, publishes,
-   and creates a GitHub release with the `.vsix` file attached. Concurrent publishing runs are serialized.
+   and oldest-supported-editor tests, dependency auditing, and packaging to pass. It then checks the tag against
+   `package.json`, publishes, and creates a GitHub release with the `.vsix` file attached. Concurrent publishing runs
+   are serialized.
 
 ## Pre-releases
 
@@ -71,6 +72,7 @@ version. VS Code moves users to the highest available version, so plan preview a
 
 ```bash
 npm ci
+npm audit --include=dev
 npm test
 npx vsce package
 npx vsce ls
@@ -80,6 +82,11 @@ On Linux without a display, run the tests as `xvfb-run -a npm test`. Tests inclu
 an isolated editor launched in Restricted Mode without the usual test runner's trust bypass.
 Set `VSCODE_TEST_VERSION=1.90.0` to repeat integration tests on the oldest supported editor.
 `npx vsce ls` lists the files that go into the package.
+
+The overrides in [`package.json`](./package.json) keep transitive development-tool dependencies on patched releases
+while their parent tools still request vulnerable versions. Keep [`package-lock.json`](./package-lock.json) in sync.
+Before removing an override, confirm the normal dependency tree is no longer vulnerable and repeat these checks,
+including the oldest supported editor.
 
 Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
 tab in an actual remote window. Provider-backed address tests cover path handling but are not an end-to-end remote

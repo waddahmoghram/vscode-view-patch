@@ -47,7 +47,13 @@ if (mode === 'inspect') {
     }, 10);
 } else if (mode === 'early-failure' || mode === 'early-success') {
     process.stderr.write(mode === 'early-failure' ? 'fixture failure' : '', () => {
-        process.exit(mode === 'early-failure' ? 7 : 0);
+        const exit = () => process.exit(mode === 'early-failure' ? 7 : 0);
+        const delay = Number(process.env.VIEW_PATCH_GIT_EXIT_DELAY || 0);
+        if (delay) {
+            setTimeout(exit, delay);
+        } else {
+            exit();
+        }
     });
 } else if (mode === 'text') {
     process.stdout.write('value\\r\\n');
@@ -288,6 +294,50 @@ describe('bounded Git execution', () => {
         })), (error: unknown) => {
             return error instanceof GitError && error.exitCode === 7 && error.message === 'fixture failure';
         });
+    });
+
+    test('lets a child report a closed-pipe failure within the configured command timeout', async context => {
+        const state = trackChild(context, child => {
+            child.stdin.emit('error', Object.assign(new Error('fixture write EOF'), { code: 'EOF' }));
+        });
+        await assert.rejects(fixtureGit.run([], options('early-failure', {
+            input: 'x',
+            timeoutMs: 10_000,
+        }, { VIEW_PATCH_GIT_EXIT_DELAY: '1500' })), (error: unknown) => {
+            return error instanceof GitError && error.exitCode === 7 && error.message === 'fixture failure';
+        });
+        assert.equal(state.closed, true);
+    });
+
+    for (const mode of ['early-failure', 'text']) {
+        test(`does not hide a genuine input error behind a quick ${mode} result`, async context => {
+            const state = trackChild(context, child => {
+                child.stdin.emit('error', Object.assign(new Error('fixture input error'), { code: 'EIO' }));
+            });
+            await assert.rejects(fixtureGit.succeeds([], options(mode)), (error: unknown) => {
+                return error instanceof GitError && error.exitCode === null && /standard input/.test(error.message);
+            });
+            assert.equal(state.closed, true);
+        });
+    }
+
+    test('rejects a Windows closed-pipe error when a successful child did not accept the input', async context => {
+        trackChild(context, child => {
+            child.stdin.emit('error', Object.assign(new Error('fixture write EOF'), { code: 'EOF' }));
+        });
+        await assert.rejects(fixtureGit.run([], options('early-success', {
+            input: 'x',
+        })), (error: unknown) => {
+            return error instanceof GitError && error.exitCode === null && /standard input/.test(error.message);
+        });
+    });
+
+    test('allows a Windows empty-input shutdown to race with a successful child exit', async context => {
+        const state = trackChild(context, child => {
+            child.stdin.emit('error', Object.assign(new Error('fixture write EOF'), { code: 'EOF' }));
+        });
+        assert.equal(await fixtureGit.text([], options('text')), 'value');
+        assert.equal(state.closed, true);
     });
 
     test('rejects an incomplete input even if the child exits successfully', async () => {
