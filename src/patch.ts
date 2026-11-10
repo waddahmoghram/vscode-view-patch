@@ -84,6 +84,31 @@ export interface MergeChanges {
     }[];
 }
 
+/** A commit's identity and headline, and what it changed against each compared side, in parent order. */
+export interface CommitChanges {
+    /** The full resolved commit hash. */
+    readonly commit: string;
+    readonly subject?: string;
+    readonly author?: string;
+    readonly date?: string;
+    /** Full parent hashes, in parent order. */
+    readonly parents: readonly string[];
+    readonly perParent: readonly {
+        /** The parent compared against, or undefined for the empty-tree side of a root commit. */
+        readonly parent?: string;
+        readonly changes: readonly FileChange[];
+        readonly skipped: readonly SkippedChange[];
+    }[];
+}
+
+/** One file's content pair for text diffing: an absent before is an added file, an absent after a deleted one. */
+export interface FileDiffInput {
+    readonly oldPath: string;
+    readonly newPath: string;
+    readonly before?: Buffer;
+    readonly after?: Buffer;
+}
+
 /** One record of Git's `--raw -z` diff output. */
 export interface RawChange {
     readonly oldMode: string;
@@ -437,30 +462,243 @@ export async function mergeChanges(
 ): Promise<MergeChanges> {
     throwIfAborted(options.signal);
     const limits = sessionLimits(options);
-    if (commit === '' || commit.startsWith('-')) {
-        throw new Error('The commit must be a nonempty revision, not a Git option.');
-    }
+    requireCommitRevision(commit);
     return withScratchSession(git, repo, options, limits, async session => {
-        const id = await session.objectId(['rev-parse', '--verify', '--end-of-options', `${commit}^{commit}`]);
-        // Plain rev-parse echoes --end-of-options; the id is already a verified full hash, so none is needed.
-        const listed = (await session.run(['rev-parse', `${id}^@`])).toString('utf8');
-        const parents = listed.split('\n').filter(line => line !== '');
-        for (const parent of parents) {
-            if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(parent)) {
-                throw new Error('Git returned an invalid parent commit identifier.');
-            }
-        }
-        const commitTree = await session.objectId(['rev-parse', '--verify', '--end-of-options', `${id}^{tree}`]);
+        const { id, parents, tree } = await resolveCommit(session, commit);
         const perParent: { parent: string; changes: readonly FileChange[]; skipped: readonly SkippedChange[] }[] = [];
         for (const parent of parents) {
-            const parentTree = await session.objectId(['rev-parse', '--verify', '--end-of-options',
-                `${parent}^{tree}`]);
-            const difference = await session.readDifference(parentTree, commitTree);
-            perParent.push({ parent, ...difference });
+            perParent.push({ parent, ...(await changesAgainstParent(session, parent, tree)) });
         }
         session.check();
         return { commit: id, parents, perParent };
     });
+}
+
+function requireCommitRevision(revision: string): void {
+    if (revision === '' || revision.startsWith('-')) {
+        throw new Error('The commit must be a nonempty revision, not a Git option.');
+    }
+}
+
+interface ResolvedCommit {
+    readonly id: string;
+    readonly parents: readonly string[];
+    readonly tree: string;
+}
+
+/** Resolves `revision` to a full commit hash, its parents in order, and its tree, validating every identifier. */
+async function resolveCommit(session: ScratchSession, revision: string): Promise<ResolvedCommit> {
+    const id = await session.objectId(['rev-parse', '--verify', '--end-of-options', `${revision}^{commit}`]);
+    // Plain rev-parse echoes --end-of-options; the id is already a verified full hash, so none is needed.
+    const listed = (await session.run(['rev-parse', `${id}^@`])).toString('utf8');
+    const parents = listed.split('\n').filter(line => line !== '');
+    for (const parent of parents) {
+        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(parent)) {
+            throw new Error('Git returned an invalid parent commit identifier.');
+        }
+    }
+    const tree = await session.objectId(['rev-parse', '--verify', '--end-of-options', `${id}^{tree}`]);
+    return { id, parents, tree };
+}
+
+/** Loads what `tree` changed against one parent commit's tree. */
+async function changesAgainstParent(session: ScratchSession, parent: string, tree: string): Promise<ChangeSet> {
+    const parentTree = await session.objectId(['rev-parse', '--verify', '--end-of-options', `${parent}^{tree}`]);
+    return session.readDifference(parentTree, tree);
+}
+
+/**
+ * The changes any commit introduces: against each parent in parent order, or against the empty tree for a root
+ * commit, whose single entry has an undefined parent.
+ *
+ * Read commands borrow source objects; the root commit's empty tree is hashed into the private store because it
+ * need not exist in the source. The repository itself is never written, and one deadline and one content budget
+ * span resolution, the headline read, and every parent's blobs, which load exactly as in `mergeChanges`.
+ */
+export async function commitChanges(
+    git: Git,
+    repo: string,
+    revision: string,
+    options: OperationOptions = {},
+): Promise<CommitChanges> {
+    throwIfAborted(options.signal);
+    const limits = sessionLimits(options);
+    requireCommitRevision(revision);
+    return withScratchSession(git, repo, options, limits, async session => {
+        const { id, parents, tree } = await resolveCommit(session, revision);
+        // One log read for the headline; the %x00 separators survive any subject text.
+        const details = (await session.run(['log', '-1', '--no-show-signature',
+            '--pretty=format:%s%x00%an <%ae>%x00%aD', id, '--'])).toString('utf8').split('\0');
+        if (details.length !== 3) {
+            throw new Error('Git returned malformed commit details.');
+        }
+        const [subject, author, date] = details.map(field => (field === '' ? undefined : field));
+        const perParent: { parent?: string; changes: readonly FileChange[]; skipped: readonly SkippedChange[] }[] =
+            [];
+        if (parents.length === 0) {
+            const emptyTree = await session.objectId(['hash-object', '-w', '-t', 'tree', '--stdin'], '', true);
+            perParent.push({ parent: undefined, ...(await session.readDifference(emptyTree, tree)) });
+        } else {
+            for (const parent of parents) {
+                perParent.push({ parent, ...(await changesAgainstParent(session, parent, tree)) });
+            }
+        }
+        session.check();
+        return { commit: id, subject, author, date, parents, perParent };
+    });
+}
+
+/**
+ * A valid, applyable unified diff for one file's content pair, as copyable text.
+ *
+ * The headers name `a/<oldPath>` and `b/<newPath>`, with `/dev/null` for an absent side, and the hunks carry
+ * Git's no-trailing-newline markers, so `git apply` accepts the result. Byte-identical sides return ''. Binary
+ * content is refused by file name because a binary difference is not copyable text. No repository is touched:
+ * the sides are diffed as private temporary files.
+ */
+export async function unifiedFileDiff(
+    git: Git,
+    file: FileDiffInput,
+    options: OperationOptions = {},
+): Promise<string> {
+    throwIfAborted(options.signal);
+    const limits = sessionLimits(options);
+    rejectBinary(file);
+    if (file.before === undefined && file.after === undefined) {
+        throw new Error(`"${file.newPath}" has no content on either side to diff.`);
+    }
+    return withNoIndexDiff(git, options, limits, async session => {
+        const output = await session.compare(file, []);
+        if (output.length === 0) {
+            return '';
+        }
+        const text = output.toString('utf8');
+        const hunks = /^@@ /m.exec(text);
+        if (!hunks) {
+            throw new Error(`Git returned a difference without hunks for "${file.newPath}".`);
+        }
+        const oldName = file.before === undefined ? '/dev/null' : `a/${file.oldPath}`;
+        const newName = file.after === undefined ? '/dev/null' : `b/${file.newPath}`;
+        return `--- ${oldName}\n+++ ${newName}\n${text.slice(hunks.index)}`;
+    });
+}
+
+/**
+ * Added and removed line counts for each content pair, in input order, with undefined for binary content.
+ *
+ * One deadline and one cancellation signal span the whole batch. Byte-identical sides count as zero lines
+ * each way. No repository is touched: the sides are diffed as private temporary files.
+ */
+export async function fileDiffStats(
+    git: Git,
+    files: readonly FileDiffInput[],
+    options: OperationOptions = {},
+): Promise<readonly ({ insertions: number; deletions: number } | undefined)[]> {
+    throwIfAborted(options.signal);
+    const limits = sessionLimits(options);
+    if (files.length === 0) {
+        return [];
+    }
+    return withNoIndexDiff(git, options, limits, async session => {
+        const stats: ({ insertions: number; deletions: number } | undefined)[] = [];
+        for (const file of files) {
+            if ((file.before && isBinary(file.before)) || (file.after && isBinary(file.after))) {
+                stats.push(undefined);
+                continue;
+            }
+            const output = (await session.compare(file, ['--numstat'])).toString('utf8');
+            stats.push(parseNumstat(output));
+        }
+        return stats;
+    });
+}
+
+function rejectBinary(file: FileDiffInput): void {
+    if (file.before && isBinary(file.before)) {
+        throw new Error(`"${file.oldPath}" is binary; a binary difference is not copyable text.`);
+    }
+    if (file.after && isBinary(file.after)) {
+        throw new Error(`"${file.newPath}" is binary; a binary difference is not copyable text.`);
+    }
+}
+
+function parseNumstat(output: string): { insertions: number; deletions: number } {
+    if (output === '') {
+        return { insertions: 0, deletions: 0 };
+    }
+    const counts = /^(\d+)\t(\d+)\t/.exec(output);
+    if (!counts) {
+        throw new Error('Git returned malformed difference statistics.');
+    }
+    return { insertions: Number(counts[1]), deletions: Number(counts[2]) };
+}
+
+/** Sequential `git diff --no-index` runs over one pair of private temporary files, under one shared deadline. */
+interface NoIndexSession {
+    readonly compare: (file: FileDiffInput, extra: readonly string[]) => Promise<Buffer>;
+}
+
+/**
+ * Runs `action` with a private temporary folder for no-index content diffs.
+ *
+ * Each compare rewrites the same side files, diffs them with deterministic options into a result file (exit
+ * status 1 means the sides differ), and returns the result bytes under the output budget. All exits remove
+ * the folder.
+ */
+async function withNoIndexDiff<T>(
+    git: Git,
+    controls: OperationOptions,
+    limits: SessionLimits,
+    action: (session: NoIndexSession) => Promise<T>,
+): Promise<T> {
+    const deadline = Date.now() + limits.timeoutMs;
+    throwIfAborted(controls.signal);
+    const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'view-patch-diff-'));
+    try {
+        const optionsFor = (): GitOptions => {
+            throwIfAborted(controls.signal);
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+                throw new OperationTimeoutError(limits.timeoutMs);
+            }
+            return {
+                ...controls,
+                cwd: scratch,
+                // GIT_DIFF_OPTS would override the explicit context length even from the command line.
+                env: { GIT_DIFF_OPTS: '' },
+                timeoutMs: remaining,
+                maxOutputBytes: limits.maxOutputBytes,
+            };
+        };
+        const before = path.join(scratch, 'before');
+        const after = path.join(scratch, 'after');
+        const result = path.join(scratch, 'result');
+        const compare = async (file: FileDiffInput, extra: readonly string[]): Promise<Buffer> => {
+            optionsFor();
+            await fs.writeFile(before, file.before ?? Buffer.alloc(0));
+            await fs.writeFile(after, file.after ?? Buffer.alloc(0));
+            try {
+                await git.run([
+                    '-c', 'diff.suppressBlankEmpty=false',
+                    'diff', '--no-index', '--no-color', '--no-ext-diff', '--unified=3',
+                    `--output=${result}`, ...extra, '--', before, after,
+                ], optionsFor());
+            } catch (error) {
+                // git diff --no-index reports differing sides through exit status 1.
+                if (!(error instanceof GitError && error.exitCode === 1)) {
+                    throw error;
+                }
+            }
+            const written = await fs.stat(result);
+            if (written.size > limits.maxOutputBytes) {
+                throw new OperationLimitError(`Git output exceeds the ${limits.maxOutputBytes}-byte limit.`);
+            }
+            return fs.readFile(result);
+        };
+        return await action({ compare });
+    } finally {
+        await fs.rm(scratch, { recursive: true, force: true });
+    }
 }
 
 function identity(change: RawChange): Pick<RawChange, 'oldId' | 'newId' | 'oldMode' | 'newMode'> {

@@ -15,9 +15,11 @@ the diff. The extension stays read-only and offline.
   normal text editor for patch files.
 - With a patch open, use the **Open Patch as Changes** button in the editor title bar.
 - Run **View Patch: Open Patch as Changes** from the Command Palette. Pasted, unsaved text also works when its editor
-  language is Diff.
+  language is Diff, and **Open Patch from Clipboard** skips even the paste.
 - Drag patch files onto the **Patch Reviews** panel in the Explorer.
 - Run **View Patch: Open Sample Patch** to try the viewer without any repository.
+- Run **View Patch: Review a Commit...** to review any revision straight from history - no patch file at all.
+  Merge commits show their changes versus each parent; a root commit is shown against the empty tree.
 
 Selecting several files with the ordinary command opens independent reviews. To apply dependent patches in order,
 use the series command below.
@@ -97,8 +99,11 @@ The panel divider can be dragged upward to give a large checklist more room.
 - Filter old and new paths with the filter button.
 - Toggle each file's **reviewed** checkmark. Selecting a file opens its individual diff. **Mark All Reviewed**
   and **Clear Reviewed Checkmarks** work on the whole review, and the view's badge counts unreviewed files.
-- **Copy Review Summary as Markdown** copies the repository, base, file list, and checkmarks for pasting
-  into a report or chat.
+- **Next/Previous Unreviewed File** walk what is left; the `viewPatch.markReviewedOnOpen` setting checks files
+  off as you open them.
+- **Copy Review Summary as Markdown** copies the repository, base, file list, per-file line counts, and
+  checkmarks for pasting into a report or chat. **Copy Diff for This File** puts one file's change on the
+  clipboard as a valid unified diff.
 - Inspect mode changes, submodule pointers, and renames without edits as explicit metadata entries rather than
   temporary notifications.
 - Reopening the same source reuses its review instead of accumulating duplicate tabs.
@@ -162,6 +167,14 @@ View Patch does not collect telemetry, contact a hosting service, or fetch missi
 channel (**View** > **Output**) explains repository selection, cancellation, limits, and Git failures.
 For a bug report, **View Patch: Copy Diagnostics** puts the version, editor, platform, and Git details on the
 clipboard, and **Open Sample Patch** checks an install without touching any repository.
+
+### Common first-run errors
+
+| Message | Meaning | Fix |
+| ------- | ------- | --- |
+| `The patch does not apply in the available repositories` with `<file>: does not exist in the index` | The base commit does not contain that file - the base is a frozen commit snapshot, so an uncommitted working-tree file does not count | Commit the file first (or pick the right repository and base with **Open Patch as Changes on a Repository and Base...**), or use **View Hunks Only** |
+| `Truncated hunk: ... a context line that lost its leading space is the usual cause` | A hand-typed or copy-pasted hunk body line is missing its leading space, `-`, or `+` | Generate patches with `git diff > file.patch` or `git format-patch` instead of typing them; verify with `git apply --check file.patch` |
+| `Unexpected patch content: ... counts are smaller than its body` | The `@@ -start,count +start,count @@` header promises fewer lines than the hunk contains | Same fix: generate, do not hand-edit; editors that trim whitespace on save also corrupt patches |
 
 ## License
 

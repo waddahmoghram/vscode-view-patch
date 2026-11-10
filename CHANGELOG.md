@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1
+
+- Review a Commit...: review any revision straight from history, no patch file needed - per-parent
+  sections for merges, empty-tree base for a root commit, reviewed checkmarks keyed to the commit.
+- Open Patch from Clipboard: copied patch text opens directly, without pasting into an editor first.
+- Next/Previous Unreviewed File commands walk the remaining checklist, and the optional
+  `viewPatch.markReviewedOnOpen` setting checks files off as their diffs are opened.
+- Copy Diff for This File: a file entry's change as a valid, applyable unified diff on the clipboard.
+- The Markdown review summary adds per-file line counts (+added/-deleted) in complete reviews.
+- Hunk-parser rejections now explain the two usual causes inline: a context line that lost its
+  leading space, and `@@` header counts smaller than the hunk body.
+- A Get Started walkthrough, a sample link in the empty Patch Reviews view, and a README
+  troubleshooting section cover the first-contact paths.
+- A real headless web session now runs in continuous integration against the browser bundle.
+- Dependabot no longer proposes `@types/vscode` bumps (the types floor must equal the oldest
+  supported editor; packaging rejects anything newer) or `@types/node` majors.
+
 ## 0.3.0
 
 - Explain already-applied patches: when a patch reverse-applies cleanly at `HEAD`, say so instead of

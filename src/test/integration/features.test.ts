@@ -284,6 +284,106 @@ suite('Review workflow commands', () => {
             await settings().update('repositories', [repo], vscode.ConfigurationTarget.Global);
         }
     });
+
+    test('opens a patch straight from the clipboard', async () => {
+        await vscode.env.clipboard.writeText(formatPatch(repo, commit));
+        const shown = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openFromClipboard');
+        assert.strictEqual(shown.length, 1);
+        assert.strictEqual(shown[0].mode, 'complete');
+        assert.strictEqual(canonical(shown[0].repo ?? ''), canonical(repo));
+    });
+
+    test('declines clipboard text that is not a patch', async () => {
+        await vscode.env.clipboard.writeText('just some prose, no diff headers');
+        const shown = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openFromClipboard');
+        assert.deepStrictEqual(shown, []);
+    });
+
+    test('reviews a commit from history without any patch file', async () => {
+        const shown = await vscode.commands.executeCommand<ShownPatch | undefined>(
+            'viewPatch.reviewCommit', repo, commit);
+        assert.ok(shown);
+        assert.strictEqual(shown.mode, 'complete');
+        const parent = git(repo, 'rev-parse', `${commit}^`).trim();
+        assert.strictEqual(shown.base, parent);
+        assert.strictEqual(shown.sections.length, 1);
+        assert.match(shown.sections[0].label, /Versus parent 1 /);
+        const sides = await readSide(shown, '/src/value.txt');
+        assert.strictEqual(sides.before, 'one\n');
+        assert.strictEqual(sides.after, 'two\n');
+        // Checkmarks key to the immutable commit: toggle, close, review again, and expect it back.
+        const fileIndex = shown.resources.findIndex(([label]) =>
+            vscode.Uri.parse(label).path.endsWith('/src/value.txt'));
+        await vscode.commands.executeCommand('viewPatch.toggleReviewed', {
+            reviewId: shown.id, sectionKey: 'combined', fileIndex,
+        });
+        await vscode.commands.executeCommand('viewPatch.closeReview', { reviewId: shown.id });
+        await waitFor(() => api.reviews.list().length === 0, 'the commit review did not close');
+        const again = await vscode.commands.executeCommand<ShownPatch | undefined>(
+            'viewPatch.reviewCommit', repo, commit);
+        assert.strictEqual(again?.sections[0].reviewed, 1);
+    });
+
+    test('reviews a merge commit per parent from history', async () => {
+        const { mergeRepo, mergeCommit } = makeMerge();
+        const shown = await vscode.commands.executeCommand<ShownPatch | undefined>(
+            'viewPatch.reviewCommit', mergeRepo, mergeCommit);
+        assert.ok(shown);
+        assert.strictEqual(shown.sections.length, 2);
+        assert.ok(shown.sections.every(section => /Versus parent [12] /.test(section.label)));
+        assert.strictEqual(shown.base, git(mergeRepo, 'rev-parse', `${mergeCommit}^1`).trim());
+    });
+
+    test('steps through unreviewed files, auto-marking when configured', async () => {
+        const shown = await open(patchFile());
+        await settings().update('markReviewedOnOpen', true, vscode.ConfigurationTarget.Global);
+        try {
+            await vscode.commands.executeCommand('viewPatch.nextUnreviewed', { reviewId: shown.id });
+            let current = api.reviews.list().find(review => review.id === shown.id);
+            assert.strictEqual(current?.sections[0].reviewed, 1);
+            await vscode.commands.executeCommand('viewPatch.nextUnreviewed', { reviewId: shown.id });
+            current = api.reviews.list().find(review => review.id === shown.id);
+            assert.strictEqual(current?.sections[0].reviewed, 2);
+            // Every file reviewed: the command reports instead of opening anything new.
+            await vscode.commands.executeCommand('viewPatch.nextUnreviewed', { reviewId: shown.id });
+            current = api.reviews.list().find(review => review.id === shown.id);
+            assert.strictEqual(current?.sections[0].reviewed, 2);
+        } finally {
+            await settings().update('markReviewedOnOpen', undefined, vscode.ConfigurationTarget.Global);
+        }
+    });
+
+    test('copies one file as a valid, applyable unified diff', async () => {
+        const shown = await open(patchFile());
+        const fileIndex = shown.resources.findIndex(([label]) =>
+            vscode.Uri.parse(label).path.endsWith('/src/value.txt'));
+        assert.ok(fileIndex >= 0);
+        const text = await vscode.commands.executeCommand<string>('viewPatch.copyFileDiff', {
+            reviewId: shown.id, sectionKey: 'combined', fileIndex,
+        });
+        assert.match(text, /^--- a\/src\/value\.txt$/m);
+        assert.match(text, /^\+\+\+ b\/src\/value\.txt$/m);
+        assert.match(text, /^-one$/m);
+        assert.match(text, /^\+two$/m);
+        const copied = path.join(scratch, `copied-${++sequence}.patch`);
+        writeFileSync(copied, text);
+        // Round-trip: Git itself must accept the copied diff against the base.
+        const worktree = path.join(scratch, `apply-check-${sequence}`);
+        git(repo, 'worktree', 'add', '--detach', worktree, `${commit}^`);
+        try {
+            git(worktree, 'apply', '--check', copied);
+        } finally {
+            git(repo, 'worktree', 'remove', '--force', worktree);
+        }
+    });
+
+    test('summary export includes per-file line counts for complete reviews', async () => {
+        const shown = await open(patchFile());
+        const summary = await vscode.commands.executeCommand<string>(
+            'viewPatch.exportSummary', { reviewId: shown.id });
+        assert.match(summary, /`src\/value\.txt` modified \(\+1\/-1\)/);
+        assert.match(summary, /`docs\/note\.md` modified \(\+1\/-1\)/);
+    });
 });
 
 function settings(): vscode.WorkspaceConfiguration {

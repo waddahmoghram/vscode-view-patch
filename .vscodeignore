@@ -6,6 +6,7 @@
 src/**
 scripts/**
 esbuild.web.mjs
+esbuild.webtest.mjs
 out/test/**
 out/browser.js
 **/*.map

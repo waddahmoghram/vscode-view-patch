@@ -34,6 +34,7 @@ export interface Review extends ReviewData {
     opening: boolean;
     seen: boolean;
     sourceChanged?: boolean;
+    lastOpened?: number;
 }
 
 export interface ReviewReference {
