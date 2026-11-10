@@ -954,7 +954,9 @@ class FileBuilder {
             }
             const kind = line.text[0];
             if (kind !== ' ' && kind !== '-' && kind !== '+') {
-                fail(`Truncated hunk: expected ${oldLeft} original and ${newLeft} new lines`, line);
+                fail(`Truncated hunk: expected ${oldLeft} original and ${newLeft} new lines, but found`
+                    + ` "${line.text.slice(0, 40)}". Hunk body lines start with a space, "-", or "+";`
+                    + ' a context line that lost its leading space is the usual cause', line);
             }
             if (kind !== '+' && --oldLeft < 0 || kind !== '-' && --newLeft < 0) {
                 fail('Hunk content exceeds the declared line counts', line);
@@ -1106,7 +1108,8 @@ function parseMessage(message: PatchMessage, budget: ContentBudget): HunkPatchPa
         } else if (text === '') {
             lines.take();
         } else if (file || text.startsWith('+++ ') || text === NO_NEWLINE) {
-            fail(`Unexpected patch content: ${text.slice(0, 80)}`, line);
+            fail(`Unexpected patch content: ${text.slice(0, 80)}. If this follows a hunk, the "@@" header`
+                + ' counts are smaller than its body; context lines keep one leading space', line);
         } else {
             lines.take();
         }
