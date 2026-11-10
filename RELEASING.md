@@ -20,6 +20,7 @@ that VS Code-compatible editors such as VSCodium use.
 
    | Field            | Value               |
    | ---------------- | ------------------- |
+   | Policy name      | `Release workflow`  |
    | Repository owner | `waddahmoghram`     |
    | Repository       | `vscode-view-patch` |
    | Workflow         | `publish.yml`       |
