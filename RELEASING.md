@@ -39,24 +39,26 @@ that VS Code-compatible editors such as VSCodium use.
 
    1. Save the token as the repository secret `OVSX_PAT`. The Publish workflow skips Open VSX when it is not set.
 
-## First public release
+## Preview phase
 
-The prepared version is 0.2.0. Nothing is published by building or installing it locally.
+Version 0.2.0 is published as a pre-release. Until the first regular release, publish each fix as another pre-release:
 
-1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases), for the first public preview.
-1. Install it from the Marketplace with **Switch to Pre-Release Version** on the extension page in VS Code, and try it.
-1. Use a new version, such as 0.2.1, for a later regular release. A preview and a regular release cannot reuse the same
-   version number.
+1. Set the next `version` in `package.json`, such as 0.2.1, and add a section for it to `CHANGELOG.md`.
+1. Commit and push to `main`, without a tag.
+1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases).
+
+A `v` tag publishes a regular release, so do not push one during this phase. For the first regular release, follow
+[Each release](#each-release) with a version higher than the last pre-release, so pre-release users move to it too.
 
 ## Each release
 
 1. Set `version` in `package.json` and add a section for it to `CHANGELOG.md`. The Marketplace accepts only
    `major.minor.patch` versions.
-1. Commit, tag, and push. For version 0.2.0:
+1. Commit, tag, and push. For example, for version 1.0.0:
 
    ```bash
-   git tag v0.2.0
-   git push origin main v0.2.0
+   git tag v1.0.0
+   git push origin main v1.0.0
    ```
 
 1. The Publish workflow first calls the shared verification workflow. Publishing waits for all Linux, macOS, Windows,
