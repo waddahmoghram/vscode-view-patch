@@ -1,5 +1,16 @@
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
+import { performance } from 'perf_hooks';
+import {
+    DEFAULT_MAX_OUTPUT_BYTES,
+    DEFAULT_TIMEOUT_MS,
+    OperationCancelledError,
+    OperationLimitError,
+    OperationOptions,
+    OperationTimeoutError,
+    positiveLimit,
+    throwIfAborted,
+} from './operations';
 
 /** A Git command that failed. The message is Git's own explanation when it printed one. */
 export class GitError extends Error {
@@ -9,7 +20,7 @@ export class GitError extends Error {
     }
 }
 
-export interface GitOptions {
+export interface GitOptions extends OperationOptions {
     /** The folder to run Git in. */
     readonly cwd: string;
     /** Environment variables to add for this command. */
@@ -29,36 +40,127 @@ const LOCATION_VARIABLES = [
     'GIT_NAMESPACE',
 ];
 
+const KILL_GRACE_MS = 250;
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
 /** Runs one Git executable, without a shell. */
 export class Git {
-    constructor(readonly path: string = 'git') {}
+    constructor(readonly path: string = 'git', private readonly argumentPrefix: readonly string[] = []) {}
 
-    /** Runs `git args` and resolves with its standard output, or rejects with a GitError. */
+    /** Runs `git args`, rejecting on failure, cancellation, timeout, or excess combined output. */
     run(args: readonly string[], options: GitOptions): Promise<Buffer> {
-        const env: Record<string, string | undefined> = { ...process.env };
-        for (const name of LOCATION_VARIABLES) {
-            delete env[name];
-        }
-        Object.assign(env, { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }, options.env);
-        // A repository can name a file-system monitor program in core.fsmonitor; these commands never need one.
-        const argv = ['-c', 'core.fsmonitor=false', ...args];
-
         return new Promise((resolve, reject) => {
+            throwIfAborted(options.signal);
+            const timeoutMs = positiveLimit('timeoutMs', options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+            const maxOutputBytes = positiveLimit('maxOutputBytes', options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES);
+            const hasInput = (options.input?.length ?? 0) > 0;
+            const env: Record<string, string | undefined> = { ...process.env };
+            for (const name of LOCATION_VARIABLES) {
+                delete env[name];
+            }
+            Object.assign(env, options.env, {
+                GIT_TERMINAL_PROMPT: '0',
+                GIT_OPTIONAL_LOCKS: '0',
+                GIT_NO_LAZY_FETCH: '1',
+            });
+            // Block lazy-fetch transports and repository-configured file-system monitors.
+            const argv = [
+                ...this.argumentPrefix,
+                '-c', 'core.fsmonitor=false',
+                '-c', 'protocol.allow=never',
+                ...args,
+            ];
             const child = spawn(this.path, argv, { cwd: options.cwd, env, windowsHide: true });
             const stdout: Buffer[] = [];
             const stderr: Buffer[] = [];
-            let failed = false;
+            const started = performance.now();
+            let outputBytes = 0;
+            let failure: Error | undefined;
+            let inputError: NodeJS.ErrnoException | undefined;
+            let timeout: NodeJS.Timeout | undefined;
+            let escalation: NodeJS.Timeout | undefined;
 
-            child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-            child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-            // Git can exit before reading all of its input; its exit status says why.
-            child.stdin.on('error', () => undefined);
-            child.on('error', (error: NodeJS.ErrnoException) => {
-                failed = true;
-                reject(new GitError(startFailure(error, this.path, options.cwd), args, null));
-            });
-            child.on('close', (code, signal) => {
-                if (failed) {
+            const terminate = (error: Error): void => {
+                if (failure) {
+                    return;
+                }
+                failure = error;
+                clearTimeout(timeout);
+                child.kill('SIGTERM');
+                escalation = setTimeout(() => {
+                    if (child.exitCode === null && child.signalCode === null) {
+                        child.kill('SIGKILL');
+                    }
+                }, KILL_GRACE_MS);
+                child.stdin.destroy();
+                child.stdout.destroy();
+                child.stderr.destroy();
+            };
+
+            const capture = (chunk: Buffer, chunks: Buffer[]): void => {
+                if (failure) {
+                    return;
+                }
+                if (chunk.length > maxOutputBytes - outputBytes) {
+                    terminate(new OperationLimitError(`Git output exceeds the ${maxOutputBytes}-byte limit.`));
+                    return;
+                }
+                outputBytes += chunk.length;
+                chunks.push(chunk);
+            };
+
+            const onAbort = (): void => terminate(new OperationCancelledError());
+            const onTimeout = (): void => {
+                const remaining = timeoutMs - (performance.now() - started);
+                if (remaining > 0) {
+                    timeout = setTimeout(onTimeout, Math.min(remaining, MAX_TIMER_DELAY_MS));
+                } else {
+                    terminate(new OperationTimeoutError(timeoutMs));
+                }
+            };
+
+            const onStdout = (chunk: Buffer): void => capture(chunk, stdout);
+            const onStderr = (chunk: Buffer): void => capture(chunk, stderr);
+            const onStdoutError = (): void => {
+                terminate(new GitError('Could not read Git standard output.', args, null));
+            };
+            const onStderrError = (): void => {
+                terminate(new GitError('Could not read Git standard error.', args, null));
+            };
+            const onInputError = (error: NodeJS.ErrnoException): void => {
+                inputError = error;
+                if (!isBrokenPipe(error)) {
+                    terminate(new GitError('Could not write Git standard input.', args, null));
+                }
+            };
+            const onChildError = (error: NodeJS.ErrnoException): void => {
+                failure ??= new GitError(startFailure(error, this.path, options.cwd), args, null);
+            };
+
+            child.stdout.on('data', onStdout);
+            child.stderr.on('data', onStderr);
+            child.stdout.on('error', onStdoutError);
+            child.stderr.on('error', onStderrError);
+            child.stdin.on('error', onInputError);
+            child.on('error', onChildError);
+            child.once('close', (code, signal) => {
+                clearTimeout(timeout);
+                clearTimeout(escalation);
+                options.signal?.removeEventListener('abort', onAbort);
+                child.stdout.removeListener('data', onStdout);
+                child.stderr.removeListener('data', onStderr);
+                child.stdout.removeListener('error', onStdoutError);
+                child.stderr.removeListener('error', onStderrError);
+                child.stdin.removeListener('error', onInputError);
+                child.removeListener('error', onChildError);
+                if (failure) {
+                    reject(failure);
+                    return;
+                }
+                // Empty-input shutdown can race with success; nonempty input must be accepted or Git must fail.
+                const expectedPipeClose = code !== null && (code !== 0 || !hasInput);
+                if (inputError && !(expectedPipeClose && isBrokenPipe(inputError))) {
+                    reject(new GitError('Could not write Git standard input.', args, null));
                     return;
                 }
                 if (code === 0) {
@@ -69,7 +171,22 @@ export class Git {
                 const fallback = code === null ? `stopped by ${signal}` : `failed with exit code ${code}`;
                 reject(new GitError(message || `git ${args[0]} ${fallback}.`, args, code));
             });
-            child.stdin.end(options.input ?? '');
+            options.signal?.addEventListener('abort', onAbort, { once: true });
+            timeout = setTimeout(onTimeout, Math.min(timeoutMs, MAX_TIMER_DELAY_MS));
+            if (options.signal?.aborted) {
+                onAbort();
+            }
+            if (!failure) {
+                try {
+                    if (hasInput) {
+                        child.stdin.end(options.input);
+                    } else {
+                        child.stdin.end();
+                    }
+                } catch {
+                    terminate(new GitError('Could not write Git standard input.', args, null));
+                }
+            }
         });
     }
 
@@ -90,6 +207,10 @@ export class Git {
             throw error;
         }
     }
+}
+
+function isBrokenPipe(error: NodeJS.ErrnoException): boolean {
+    return error.code === 'EPIPE' || error.code === 'ECONNRESET';
 }
 
 // Node reports a missing working folder and a missing executable with the same ENOENT error.

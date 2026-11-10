@@ -37,13 +37,14 @@ that VS Code-compatible editors such as VSCodium use.
 
    1. Save the token as the repository secret `OVSX_PAT`. The Publish workflow skips Open VSX when it is not set.
 
-## First release
+## First public release
 
-The version in `package.json` is 0.1.0, an odd minor version, so publish it as a pre-release first:
+The prepared version is 0.2.0. Nothing is published by building or installing it locally.
 
-1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases).
+1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases), for the first public preview.
 1. Install it from the Marketplace with **Switch to Pre-Release Version** on the extension page in VS Code, and try it.
-1. Publish 0.2.0 as the first regular release, following [Each release](#each-release).
+1. Use a new version, such as 0.2.1, for a later regular release. A preview and a regular release cannot reuse the same
+   version number.
 
 ## Each release
 
@@ -56,14 +57,15 @@ The version in `package.json` is 0.1.0, an odd minor version, so publish it as a
    git push origin main v0.2.0
    ```
 
-1. The Publish workflow checks that the tag matches `package.json`, runs the tests, publishes the package, and creates
-   a GitHub release with the `.vsix` file attached.
+1. The Publish workflow first calls the shared verification workflow. Publishing waits for all Linux, macOS, Windows,
+   and oldest-supported-editor tests and packaging to pass. It then checks the tag against `package.json`, publishes,
+   and creates a GitHub release with the `.vsix` file attached. Concurrent publishing runs are serialized.
 
 ## Pre-releases
 
 Run the Publish workflow by hand from the **Actions** tab, from `main`, with **Publish as a pre-release** checked. A
-pre-release needs a version number of its own. The Marketplace documentation suggests odd minor versions for
-pre-releases (0.3.x) and even ones for releases (0.2.x), because VS Code moves users to the highest version available.
+pre-release needs a version number of its own. Preview status is a publishing flag, not a `-beta` suffix on the
+version. VS Code moves users to the highest available version, so plan preview and regular versions together.
 
 ## Checking a package locally
 
@@ -74,5 +76,11 @@ npx vsce package
 npx vsce ls
 ```
 
-On Linux without a display, run the tests as `xvfb-run -a npm test`. `npx vsce ls` lists the files that go into the
-package.
+On Linux without a display, run the tests as `xvfb-run -a npm test`. Tests include real trusted-editor sessions and
+an isolated editor launched in Restricted Mode without the usual test runner's trust bypass.
+Set `VSCODE_TEST_VERSION=1.90.0` to repeat integration tests on the oldest supported editor.
+`npx vsce ls` lists the files that go into the package.
+
+Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
+tab in an actual remote window. Provider-backed address tests cover path handling but are not an end-to-end remote
+connection test.
