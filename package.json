@@ -1,0 +1,116 @@
+{
+  "name": "view-patch",
+  "displayName": "View Patch",
+  "description": "Open a .patch or .diff file as one side-by-side Changes view of the complete files, taken from the Git repository it applies to.",
+  "version": "0.1.0",
+  "publisher": "waddahmoghram",
+  "author": "Waddah Moghram",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/waddahmoghram/vscode-view-patch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/waddahmoghram/vscode-view-patch/issues"
+  },
+  "homepage": "https://github.com/waddahmoghram/vscode-view-patch#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "patch",
+    "diff",
+    "git",
+    "format-patch",
+    "review",
+    "side by side",
+    "changes",
+    "compare"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "View Patch runs Git in your repositories, so it only opens patches in a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "viewPatch.open",
+        "title": "Open Patch as Changes",
+        "category": "View Patch",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "viewPatch.openWith",
+        "title": "Open Patch as Changes on a Repository and Base...",
+        "category": "View Patch"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "viewPatch.open",
+          "when": "resourceExtname =~ /^\\.(diff|patch)$/i",
+          "group": "3_compare@10"
+        },
+        {
+          "command": "viewPatch.openWith",
+          "when": "resourceExtname =~ /^\\.(diff|patch)$/i",
+          "group": "3_compare@11"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "viewPatch.open",
+          "when": "resourceLangId == diff",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "View Patch",
+      "properties": {
+        "viewPatch.repositories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Extra Git repository folders to look in when a patch's repository is not open in this window. A leading `~` means your home folder."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test \"out/test/unit/**/*.test.js\"",
+    "test:integration": "vscode-test",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.90.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "typescript": "^7.0.2"
+  }
+}

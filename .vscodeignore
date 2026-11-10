@@ -1,0 +1,14 @@
+.github/**
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+.gitignore
+src/**
+out/test/**
+**/*.map
+**/*.ts
+tsconfig.json
+images/make_icon.py
+images/screenshot.png
+RELEASING.md
+*.vsix

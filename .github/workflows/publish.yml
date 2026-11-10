@@ -1,0 +1,60 @@
+name: Publish
+
+# A version tag (v1.2.3) publishes a release. Running the workflow by hand from main publishes the current version,
+# as a pre-release unless that box is cleared. The Marketplace's Trusted Publishing policy must name this file.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      pre_release:
+        description: Publish as a pre-release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # sign in to the Marketplace with Trusted Publishing
+    env:
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      PRE_RELEASE_FLAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.pre_release) && '--pre-release' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check that the tag matches package.json
+        if: github.event_name == 'push'
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}."
+            exit 1
+          fi
+      - run: npm run compile
+      - run: npm run test:unit
+      - run: xvfb-run -a npm run test:integration
+      - name: Package
+        run: npx vsce package ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --out view-patch.vsix
+      - name: Publish to the Visual Studio Marketplace
+        run: npx vsce publish --oidc ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --packagePath view-patch.vsix
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx --yes ovsx@1.4.0 publish view-patch.vsix ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --pat "${OVSX_PAT}"
+      - name: Create the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" view-patch.vsix
+          --title "${GITHUB_REF_NAME}"
+          --notes "See CHANGELOG.md for what changed."
