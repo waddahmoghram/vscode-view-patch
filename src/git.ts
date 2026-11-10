@@ -41,6 +41,7 @@ const LOCATION_VARIABLES = [
 ];
 
 const KILL_GRACE_MS = 250;
+const INPUT_GRACE_MS = 1_000;
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 /** Runs one Git executable, without a shell. */
@@ -79,6 +80,7 @@ export class Git {
             let inputError: NodeJS.ErrnoException | undefined;
             let timeout: NodeJS.Timeout | undefined;
             let escalation: NodeJS.Timeout | undefined;
+            let inputGrace: NodeJS.Timeout | undefined;
 
             const terminate = (error: Error): void => {
                 if (failure) {
@@ -127,11 +129,16 @@ export class Git {
             const onStderrError = (): void => {
                 terminate(new GitError('Could not read Git standard error.', args, null));
             };
+            // The error code for a pipe the child closed varies by platform (EPIPE, ECONNRESET, and
+            // others on Windows), so no code is classified here. A child that is already exiting
+            // reports its own result at close; one that keeps running is terminated after a grace period.
             const onInputError = (error: NodeJS.ErrnoException): void => {
-                inputError = error;
-                if (!isBrokenPipe(error)) {
-                    terminate(new GitError('Could not write Git standard input.', args, null));
-                }
+                inputError ??= error;
+                inputGrace ??= setTimeout(() => {
+                    if (child.exitCode === null && child.signalCode === null) {
+                        terminate(new GitError('Could not write Git standard input.', args, null));
+                    }
+                }, INPUT_GRACE_MS);
             };
             const onChildError = (error: NodeJS.ErrnoException): void => {
                 failure ??= new GitError(startFailure(error, this.path, options.cwd), args, null);
@@ -146,6 +153,7 @@ export class Git {
             child.once('close', (code, signal) => {
                 clearTimeout(timeout);
                 clearTimeout(escalation);
+                clearTimeout(inputGrace);
                 options.signal?.removeEventListener('abort', onAbort);
                 child.stdout.removeListener('data', onStdout);
                 child.stderr.removeListener('data', onStderr);
@@ -159,7 +167,7 @@ export class Git {
                 }
                 // Empty-input shutdown can race with success; nonempty input must be accepted or Git must fail.
                 const expectedPipeClose = code !== null && (code !== 0 || !hasInput);
-                if (inputError && !(expectedPipeClose && isBrokenPipe(inputError))) {
+                if (inputError && !expectedPipeClose) {
                     reject(new GitError('Could not write Git standard input.', args, null));
                     return;
                 }
@@ -183,8 +191,8 @@ export class Git {
                     } else {
                         child.stdin.end();
                     }
-                } catch {
-                    terminate(new GitError('Could not write Git standard input.', args, null));
+                } catch (error) {
+                    onInputError(error as NodeJS.ErrnoException);
                 }
             }
         });
@@ -207,10 +215,6 @@ export class Git {
             throw error;
         }
     }
-}
-
-function isBrokenPipe(error: NodeJS.ErrnoException): boolean {
-    return error.code === 'EPIPE' || error.code === 'ECONNRESET';
 }
 
 // Node reports a missing working folder and a missing executable with the same ENOENT error.
