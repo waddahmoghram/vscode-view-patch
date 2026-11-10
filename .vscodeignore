@@ -4,6 +4,7 @@
 .vscode-test.mjs
 .gitignore
 src/**
+scripts/**
 out/test/**
 **/*.map
 **/*.ts

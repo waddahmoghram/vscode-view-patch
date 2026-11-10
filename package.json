@@ -1,8 +1,8 @@
 {
   "name": "view-patch",
   "displayName": "View Patch",
-  "description": "Open a .patch or .diff file as one side-by-side Changes view of the complete files, taken from the Git repository it applies to.",
-  "version": "0.1.0",
+  "description": "Review patches and patch series side by side, with complete Git-backed files or explicit repository-free hunk views.",
+  "version": "0.2.0",
   "publisher": "waddahmoghram",
   "author": "Waddah Moghram",
   "license": "MIT",
@@ -38,11 +38,14 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "View Patch runs Git in your repositories, so it only opens patches in a trusted workspace."
+      "description": "Complete-file reviews run Git and require trust. Hunk-only views work without trust or Git."
     },
     "virtualWorkspaces": false
   },
-  "activationEvents": [],
+  "activationEvents": [
+    "onCustomEditor:viewPatch.editor",
+    "onView:viewPatch.reviews"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -56,6 +59,91 @@
         "command": "viewPatch.openWith",
         "title": "Open Patch as Changes on a Repository and Base...",
         "category": "View Patch"
+      },
+      {
+        "command": "viewPatch.openHunks",
+        "title": "View Patch Hunks Only",
+        "category": "View Patch",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "viewPatch.openSeries",
+        "title": "Open Selected Patches as Series...",
+        "category": "View Patch",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "viewPatch.refresh",
+        "title": "Refresh Review",
+        "category": "View Patch",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "viewPatch.changeBase",
+        "title": "Change Repository and Base...",
+        "category": "View Patch",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "viewPatch.toggleReviewed",
+        "title": "Toggle Reviewed",
+        "category": "View Patch",
+        "icon": "$(check)"
+      },
+      {
+        "command": "viewPatch.filter",
+        "title": "Filter Review Paths...",
+        "category": "View Patch",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "viewPatch.clearFilter",
+        "title": "Clear Review Filter",
+        "category": "View Patch",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "viewPatch.showSummary",
+        "title": "Show Patch Reviews",
+        "category": "View Patch",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "viewPatch.closeReview",
+        "title": "Close Review",
+        "category": "View Patch",
+        "icon": "$(close)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "viewPatch.editor",
+        "displayName": "View Patch (Changes)",
+        "selector": [
+          {
+            "filenamePattern": "*.patch"
+          },
+          {
+            "filenamePattern": "*.diff"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "viewPatch.reviews",
+          "name": "Patch Reviews",
+          "contextualTitle": "View Patch",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "viewPatch.reviews",
+        "contents": "Open a patch to review it here.\n[Open Patch as Changes](command:viewPatch.open)\n[View Hunks Only](command:viewPatch.openHunks)"
       }
     ],
     "menus": {
@@ -69,6 +157,16 @@
           "command": "viewPatch.openWith",
           "when": "resourceExtname =~ /^\\.(diff|patch)$/i",
           "group": "3_compare@11"
+        },
+        {
+          "command": "viewPatch.openHunks",
+          "when": "resourceExtname =~ /^\\.(diff|patch)$/i",
+          "group": "3_compare@12"
+        },
+        {
+          "command": "viewPatch.openSeries",
+          "when": "resourceExtname =~ /^\\.(diff|patch)$/i",
+          "group": "3_compare@13"
         }
       ],
       "editor/title": [
@@ -76,6 +174,45 @@
           "command": "viewPatch.open",
           "when": "resourceLangId == diff",
           "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "viewPatch.filter",
+          "when": "view == viewPatch.reviews",
+          "group": "navigation@1"
+        },
+        {
+          "command": "viewPatch.clearFilter",
+          "when": "view == viewPatch.reviews && viewPatch.filtered",
+          "group": "navigation@2"
+        },
+        {
+          "command": "viewPatch.refresh",
+          "when": "view == viewPatch.reviews && viewPatch.hasReviews",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "viewPatch.toggleReviewed",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.file\\./",
+          "group": "inline@1"
+        },
+        {
+          "command": "viewPatch.refresh",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "inline@1"
+        },
+        {
+          "command": "viewPatch.changeBase",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "review@1"
+        },
+        {
+          "command": "viewPatch.closeReview",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "inline@2"
         }
       ]
     },
@@ -90,6 +227,38 @@
           "default": [],
           "scope": "machine",
           "markdownDescription": "Extra Git repository folders to look in when a patch's repository is not open in this window. A leading `~` means your home folder."
+        },
+        "viewPatch.gitTimeoutSeconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 600,
+          "scope": "machine",
+          "description": "Maximum time for each Git command. Cancelling a review also stops its Git command."
+        },
+        "viewPatch.maxPatchSizeMiB": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 512,
+          "scope": "machine",
+          "description": "Maximum patch input size in mebibytes (1048576 bytes)."
+        },
+        "viewPatch.maxContentSizeMiB": {
+          "type": "integer",
+          "default": 64,
+          "minimum": 1,
+          "maximum": 2048,
+          "scope": "machine",
+          "description": "Maximum unique file content retained while loading one review, in mebibytes."
+        },
+        "viewPatch.maxOpenContentMiB": {
+          "type": "integer",
+          "default": 128,
+          "minimum": 1,
+          "maximum": 4096,
+          "scope": "machine",
+          "description": "Maximum file bytes retained by open reviews, in mebibytes. Open reviews are never evicted."
         }
       }
     }
@@ -101,7 +270,9 @@
     "pretest": "npm run compile",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test \"out/test/unit/**/*.test.js\"",
-    "test:integration": "vscode-test",
+    "test:integration": "npm run test:editor && npm run test:restricted",
+    "test:editor": "vscode-test",
+    "test:restricted": "node scripts/test-restricted.mjs",
     "package": "vsce package"
   },
   "devDependencies": {

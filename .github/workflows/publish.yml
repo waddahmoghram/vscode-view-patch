@@ -15,8 +15,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: view-patch-publish
+  cancel-in-progress: false
+
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: verify
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -40,9 +48,6 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}."
             exit 1
           fi
-      - run: npm run compile
-      - run: npm run test:unit
-      - run: xvfb-run -a npm run test:integration
       - name: Package
         run: npx vsce package ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --out view-patch.vsix
       - name: Publish to the Visual Studio Marketplace
