@@ -5,7 +5,9 @@
 .gitignore
 src/**
 scripts/**
+esbuild.web.mjs
 out/test/**
+out/browser.js
 **/*.map
 **/*.ts
 tsconfig.json

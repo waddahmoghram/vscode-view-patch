@@ -216,6 +216,7 @@ describe('applyPatch', () => {
         assert.equal(submodule?.oldMode, '000000');
         assert.equal(submodule?.newMode, '160000');
         assert.equal(submodule?.newId, git(repo, 'rev-parse', `${commit}^`).trim());
+        assert.equal(applied.resultTree, git(repo, 'rev-parse', `${commit}^{tree}`).trim());
     });
 
     test('never writes to the repository and removes its scratch folder', async () => {
@@ -417,6 +418,7 @@ describe('applyPatch', () => {
 
         assert.equal(readTree, initialTree);
         assert.equal(applied.baseTree, initialTree);
+        assert.equal(applied.resultTree, git(repo, 'rev-parse', `${next}^{tree}`).trim());
         assert.deepEqual(applied.changes.map(contentOnly), [change('M', 'a.txt', 'a.txt', 'one\n', 'two\n')]);
     });
 
@@ -567,6 +569,39 @@ describe('applyPatch', () => {
     });
 });
 
+describe('transfer-encoded messages', () => {
+    const equalsDiff = [
+        'diff --git a/eq.txt b/eq.txt',
+        '--- a/eq.txt',
+        '+++ b/eq.txt',
+        '@@ -1 +1 @@',
+        '-plain',
+        '+a=b',
+    ];
+
+    test('applies a quoted-printable message whose diff carries a literal equals sign', async () => {
+        const repo = makeRepo({ 'eq.txt': 'plain\n' });
+        const applied = await applyPatch(gitTool, repo, 'HEAD', quotedPrintable('Use equals', equalsDiff));
+        assert.deepEqual(applied.changes.map(contentOnly), [change('M', 'eq.txt', 'eq.txt', 'plain\n', 'a=b\n')]);
+        assert.match(applied.metadata?.subject ?? '', /Use equals/);
+        assert.equal(applied.parts?.length, 1);
+    });
+
+    test('names the message and the encoding problem instead of applying undecoded bytes', async () => {
+        const repo = makeRepo({ 'eq.txt': 'plain\n' });
+        const message = mailboxMessage('Will not decode', 'x-uuencode', equalsDiff.join('\n'));
+        const scratchRoot = tempDir('view-patch-encoding-');
+        await withTempRoot(scratchRoot, () => assert.rejects(
+            applyPatch(gitTool, repo, 'HEAD', message),
+            (error: unknown) => error instanceof Error && !(error instanceof GitError) && new RegExp(
+                '^Patch 1/1 \\(.*Will not decode\\) cannot be decoded: '
+                + 'Unsupported Content-Transfer-Encoding: x-uuencode\\.$',
+            ).test(error.message),
+        ));
+        assert.deepEqual(readdirSync(scratchRoot), []);
+    });
+});
+
 describe('blob response validation', () => {
     type Corrupt = (output: Buffer, id: string) => Buffer;
     const replaceHeader = (output: Buffer, header: string): Buffer =>
@@ -645,4 +680,25 @@ async function withTempRoot<T>(root: string, run: () => Promise<T>): Promise<T> 
             }
         });
     }
+}
+
+// A format-patch style mailbox message with the given Content-Transfer-Encoding and raw body.
+function mailboxMessage(subject: string, encoding: string, body: string): Buffer {
+    return Buffer.from([
+        'From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2001',
+        'From: Encoded Author <encoded@example.com>',
+        'Date: Mon, 1 Jan 2024 00:00:00 +0000',
+        `Subject: [PATCH] ${subject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=utf-8',
+        `Content-Transfer-Encoding: ${encoding}`,
+        '',
+        body,
+        '',
+    ].join('\n'));
+}
+
+// The same message quoted-printable encoded: every literal '=' in the body becomes '=3D'.
+function quotedPrintable(subject: string, diffLines: readonly string[]): Buffer {
+    return mailboxMessage(subject, 'quoted-printable', diffLines.join('\n').replace(/=/g, '=3D'));
 }

@@ -93,5 +93,5 @@ Before removing an override, confirm the normal dependency tree is no longer vul
 including the oldest supported editor.
 
 Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
-tab in an actual remote window. Provider-backed address tests cover path handling but are not an end-to-end remote
-connection test.
+tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. Provider-backed address
+tests cover path handling but are not an end-to-end remote connection or web-session test.

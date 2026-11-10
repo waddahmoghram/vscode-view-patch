@@ -32,7 +32,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run compile
+      - run: npm run compile:web
       - run: npm run test:unit
+      - name: Unit test coverage report
+        if: runner.os == 'Linux' && matrix.vscode == 'stable'
+        run: npm run test:unit:coverage
       - name: Integration tests (virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:integration

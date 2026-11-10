@@ -1,5 +1,5 @@
 import * as assert from 'node:assert/strict';
-import { promises as fs } from 'node:fs';
+import { lstatSync, promises as fs, readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { after, describe, mock, test } from 'node:test';
@@ -11,7 +11,7 @@ import {
     OperationOptions,
     OperationTimeoutError,
 } from '../../operations';
-import { findRepositories, hasCommit, isRevision, parentOf, resolvePatch, topLevel } from '../../repositories';
+import { commitParents, findRepositories, hasCommit, isRevision, parentOf, resolvePatch, topLevel } from '../../repositories';
 import { canonical, commitAll, formatPatch, git, makeRepo, removeTempDirs, tempDir, writeFiles } from '../helpers';
 
 const gitTool = new Git();
@@ -381,6 +381,7 @@ describe('repository operation options', () => {
         await hasCommit(recording, repo, commit, operation);
         await isRevision(recording, repo, commit, operation);
         await parentOf(recording, repo, commit, operation);
+        await commitParents(recording, repo, commit, operation);
         await resolvePatch(recording, [repo], patch, commit, operation);
         assert.ok(recording.calls.length > 10);
         for (const call of recording.calls) {
@@ -412,6 +413,7 @@ describe('repository operation options', () => {
         await assert.rejects(hasCommit(failing, 'repo', '', operation), OperationCancelledError);
         await assert.rejects(isRevision(failing, 'repo', '', operation), OperationCancelledError);
         await assert.rejects(parentOf(failing, 'repo', '', operation), OperationCancelledError);
+        await assert.rejects(commitParents(failing, 'repo', '', operation), OperationCancelledError);
         await assert.rejects(
             resolvePatch(failing, [], Buffer.alloc(0), undefined, operation),
             OperationCancelledError,
@@ -432,6 +434,7 @@ describe('repository operation options', () => {
             await assert.rejects(hasCommit(failing, folder, 'main'), error => error === failure);
             await assert.rejects(isRevision(failing, folder, 'main'), error => error === failure);
             await assert.rejects(parentOf(failing, folder, 'main'), error => error === failure);
+            await assert.rejects(commitParents(failing, folder, 'main'), error => error === failure);
             await assert.rejects(resolvePatch(failing, [folder], sampleDiff), error => error === failure);
             await assert.rejects(
                 resolvePatch(failing, [folder], sampleDiff, 'commit'),
@@ -440,3 +443,261 @@ describe('repository operation options', () => {
         });
     }
 });
+
+describe('commitParents', () => {
+    test('lists parents in order for linear, merge, and octopus commits', async () => {
+        const repo = makeRepo({ 'a.txt': 'base\n' });
+        for (const branch of ['b1', 'b2']) {
+            git(repo, 'checkout', '-qb', branch, 'main');
+            writeFiles(repo, { [`${branch}.txt`]: `${branch}\n` });
+            commitAll(repo, `Branch ${branch}`);
+        }
+        git(repo, 'checkout', '-q', 'main');
+        writeFiles(repo, { 'main.txt': 'm\n' });
+        const tip = commitAll(repo, 'Main tip');
+        assert.deepEqual(await commitParents(gitTool, repo, tip), [git(repo, 'rev-parse', `${tip}^`).trim()]);
+        git(repo, 'merge', '-q', '--no-edit', 'b1', 'b2');
+        const expected = [1, 2, 3].map(parent => git(repo, 'rev-parse', `HEAD^${parent}`).trim());
+        assert.deepEqual(await commitParents(gitTool, repo, 'HEAD'), expected);
+    });
+
+    test('returns no parents for a root commit', async () => {
+        const repo = makeRepo({ 'a.txt': 'first\n' });
+        assert.deepEqual(await commitParents(gitTool, repo, git(repo, 'rev-parse', 'HEAD').trim()), []);
+    });
+
+    test('rejects option-like commits without invoking Git', async () => {
+        const failing = new FailingGit(new Error('Git must not run'));
+        for (const commit of ['', '--all', '-n1']) {
+            await assert.rejects(commitParents(failing, 'unused-repo', commit), /not a Git option/);
+        }
+        assert.equal(failing.calls, 0);
+    });
+
+    test('fails for revisions that are not commits', async () => {
+        const { repo } = twoCommits();
+        await assert.rejects(commitParents(gitTool, repo, git(repo, 'rev-parse', 'HEAD^{tree}').trim()), GitError);
+        await assert.rejects(commitParents(gitTool, repo, 'no-such-branch'), GitError);
+    });
+
+    test('follows the shallow presentation at a boundary commit, unlike parentOf', async () => {
+        const { repo, commit } = twoCommits();
+        const shallow = path.join(tempDir(), 'shallow');
+        git(repo, 'clone', '-q', '--depth=1', pathToFileURL(repo).href, shallow);
+        // rev-parse commit^@ hides grafted parents, so a boundary commit reads as parentless here.
+        assert.deepEqual(await commitParents(gitTool, shallow, commit), []);
+        assert.equal(await parentOf(gitTool, shallow, commit), `${commit}^`);
+    });
+});
+
+describe('already-applied detection', () => {
+    test('flags a single-message patch that reverse-applies on HEAD and writes nothing', async () => {
+        const { repo, patch } = twoCommits();
+        const short = git(repo, 'rev-parse', '--short', 'HEAD').trim();
+        const snapshot = () => ({
+            files: snapshotFiles(repo),
+            objects: git(repo, 'count-objects', '-v'),
+            refs: git(repo, 'show-ref'),
+        });
+        const before = snapshot();
+        const scratchRoot = tempDir('view-patch-already-');
+
+        const resolution = await withTempRoot(scratchRoot, () => resolvePatch(gitTool, [repo], patch));
+
+        assert.deepEqual(resolution.targets, []);
+        assert.equal(resolution.failures.length, 1);
+        assert.deepEqual(resolution.alreadyApplied, [{ repo, revision: `HEAD (${short})` }]);
+        assert.deepEqual(snapshot(), before);
+        assert.deepEqual(readdirSync(scratchRoot), []);
+    });
+
+    test('does not flag a patch that applies forward', async () => {
+        const { repo, commit, diff } = twoCommits();
+        git(repo, 'checkout', '-q', '--detach', `${commit}^`);
+        const resolution = await resolvePatch(gitTool, [repo], diff);
+        assert.equal(resolution.targets.length, 1);
+        assert.equal(resolution.alreadyApplied, undefined);
+    });
+
+    test('does not flag a patch that neither applies nor reverse-applies', async () => {
+        const { patch } = twoCommits();
+        const repo = makeRepo({ 'a.txt': 'different\n' });
+        const resolution = await resolvePatch(gitTool, [repo], patch);
+        assert.deepEqual(resolution.targets, []);
+        assert.equal(resolution.failures.length, 1);
+        assert.equal(resolution.alreadyApplied, undefined);
+    });
+
+    test('flags a fully applied series but not a partially applied one', async () => {
+        const repo = makeRepo({ 'seed.txt': 'base\n' });
+        const base = git(repo, 'rev-parse', 'HEAD').trim();
+        writeFiles(repo, { 'created.txt': 'one\n' });
+        commitAll(repo, 'Step 1');
+        writeFiles(repo, { 'created.txt': 'two\n' });
+        commitAll(repo, 'Step 2');
+        const series = Buffer.from(git(repo, 'format-patch', '--stdout', `${base}..HEAD`));
+        const short = git(repo, 'rev-parse', '--short', 'HEAD').trim();
+
+        const full = await resolvePatch(gitTool, [repo], series);
+        assert.deepEqual(full.targets, []);
+        assert.deepEqual(full.alreadyApplied, [{ repo, revision: `HEAD (${short})` }]);
+
+        git(repo, 'reset', '-q', '--hard', 'HEAD~1');
+        const partial = await resolvePatch(gitTool, [repo], series);
+        assert.deepEqual(partial.targets, []);
+        assert.equal(partial.alreadyApplied, undefined);
+
+        git(repo, 'reset', '-q', '--hard', base);
+        const fresh = await resolvePatch(gitTool, [repo], series);
+        assert.equal(fresh.targets.length, 1);
+        assert.equal(fresh.alreadyApplied, undefined);
+    });
+
+    test("flags the applied state when the named commit's patch fails on its parent", async () => {
+        const { repo, commit, patch } = twoCommits();
+        const edited = Buffer.from(patch.toString().replace('-one', '-uno'));
+        const short = git(repo, 'rev-parse', '--short', 'HEAD').trim();
+        const resolution = await resolvePatch(gitTool, [repo], edited, commit);
+        assert.equal(resolution.commitRepo, repo);
+        assert.deepEqual(resolution.targets, []);
+        assert.deepEqual(resolution.alreadyApplied, [{ repo, revision: `HEAD (${short})` }]);
+    });
+
+    test('scans candidates in order and flags only those whose HEAD matches', async () => {
+        const { repo, patch } = twoCommits();
+        const clone = path.join(tempDir(), 'clone');
+        git(repo, 'clone', '-q', repo, clone);
+        const other = makeRepo({ 'a.txt': 'different\n' });
+        const resolution = await resolvePatch(gitTool, [other, repo, clone], patch);
+        assert.deepEqual(resolution.targets, []);
+        assert.deepEqual(resolution.alreadyApplied, [
+            { repo, revision: `HEAD (${git(repo, 'rev-parse', '--short', 'HEAD').trim()})` },
+            { repo: clone, revision: `HEAD (${git(clone, 'rev-parse', '--short', 'HEAD').trim()})` },
+        ]);
+    });
+
+    test('stops at the shared deadline, keeping the resolution and the flags found so far', async () => {
+        const { repo, patch } = twoCommits();
+        const clone = path.join(tempDir(), 'clone');
+        git(repo, 'clone', '-q', repo, clone);
+        const short = git(repo, 'rev-parse', '--short', 'HEAD').trim();
+        class SlowGit extends Git {
+            override async run(args: readonly string[], options: GitOptions): Promise<Buffer> {
+                if (args.includes('--check') && args.includes('--reverse')) {
+                    await new Promise(resolve => setTimeout(resolve, 1_200));
+                }
+                return super.run(args, options);
+            }
+        }
+        const resolution = await resolvePatch(new SlowGit(), [repo, clone], patch, undefined, { timeoutMs: 1_000 });
+        assert.equal(resolution.failures.length, 2);
+        assert.deepEqual(resolution.alreadyApplied, [{ repo, revision: `HEAD (${short})` }]);
+    });
+
+    test('propagates cancellation during detection and cleans the scratch folder', async () => {
+        const { repo, patch } = twoCommits();
+        const controller = new AbortController();
+        class CancellingGit extends Git {
+            override run(args: readonly string[], options: GitOptions): Promise<Buffer> {
+                if (args.includes('--check') && args.includes('--reverse')) {
+                    controller.abort();
+                }
+                return super.run(args, options);
+            }
+        }
+        const scratchRoot = tempDir('view-patch-already-cancel-');
+        await withTempRoot(scratchRoot, () => assert.rejects(
+            resolvePatch(new CancellingGit(), [repo], patch, undefined, { signal: controller.signal }),
+            OperationCancelledError,
+        ));
+        assert.deepEqual(readdirSync(scratchRoot), []);
+    });
+
+    test('detects an already-applied quoted-printable patch via its decoded bytes', async () => {
+        const repo = makeRepo({ 'eq.txt': 'plain\n' });
+        writeFiles(repo, { 'eq.txt': 'a=b\n' });
+        commitAll(repo, 'Use equals');
+        const short = git(repo, 'rev-parse', '--short', 'HEAD').trim();
+        const resolution = await resolvePatch(gitTool, [repo], quotedPrintable('Use equals', equalsDiff));
+        assert.deepEqual(resolution.targets, []);
+        assert.equal(resolution.failures.length, 1);
+        assert.deepEqual(resolution.alreadyApplied, [{ repo, revision: `HEAD (${short})` }]);
+    });
+
+    test('rejects an undecodable diff-bearing message with the named error before any detection', async () => {
+        const repo = makeRepo({ 'eq.txt': 'plain\n' });
+        const message = mailboxMessage('Will not decode', 'x-uuencode', equalsDiff.join('\n'));
+        await assert.rejects(resolvePatch(gitTool, [repo], message), (error: unknown) =>
+            error instanceof Error && !(error instanceof GitError)
+            && /cannot be decoded: Unsupported Content-Transfer-Encoding: x-uuencode\.$/.test(error.message));
+    });
+});
+
+// Mirrors patch.test.ts: byte, mode, and timestamp snapshots prove the source repository served reads only.
+function snapshotFiles(root: string): Record<string, string> {
+    const files: Record<string, string> = {};
+    const visit = (relative: string): void => {
+        const absolute = path.join(root, relative);
+        const stat = lstatSync(absolute, { bigint: true });
+        const attributes = `${stat.mode}:${stat.mtimeNs}:${stat.ctimeNs}`;
+        if (stat.isDirectory()) {
+            files[relative] = `directory:${attributes}`;
+            for (const name of readdirSync(absolute).sort()) {
+                visit(path.join(relative, name));
+            }
+        } else {
+            const bytes = stat.isSymbolicLink() ? readlinkSync(absolute) : readFileSync(absolute).toString('base64');
+            files[relative] = `${attributes}:${bytes}`;
+        }
+    };
+    visit('');
+    return files;
+}
+
+// os.tmpdir() reads TMPDIR on Linux and macOS, and TEMP or TMP on Windows.
+async function withTempRoot<T>(root: string, run: () => Promise<T>): Promise<T> {
+    const names = ['TMPDIR', 'TEMP', 'TMP'];
+    const saved = names.map(name => process.env[name]);
+    names.forEach(name => (process.env[name] = root));
+    try {
+        return await run();
+    } finally {
+        names.forEach((name, i) => {
+            if (saved[i] === undefined) {
+                delete process.env[name];
+            } else {
+                process.env[name] = saved[i];
+            }
+        });
+    }
+}
+
+const equalsDiff = [
+    'diff --git a/eq.txt b/eq.txt',
+    '--- a/eq.txt',
+    '+++ b/eq.txt',
+    '@@ -1 +1 @@',
+    '-plain',
+    '+a=b',
+];
+
+// A format-patch style mailbox message with the given Content-Transfer-Encoding and raw body.
+function mailboxMessage(subject: string, encoding: string, body: string): Buffer {
+    return Buffer.from([
+        'From 0123456789abcdef0123456789abcdef01234567 Mon Sep 17 00:00:00 2001',
+        'From: Encoded Author <encoded@example.com>',
+        'Date: Mon, 1 Jan 2024 00:00:00 +0000',
+        `Subject: [PATCH] ${subject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=utf-8',
+        `Content-Transfer-Encoding: ${encoding}`,
+        '',
+        body,
+        '',
+    ].join('\n'));
+}
+
+// The same message quoted-printable encoded: every literal '=' in the body becomes '=3D'.
+function quotedPrintable(subject: string, diffLines: readonly string[]): Buffer {
+    return mailboxMessage(subject, 'quoted-printable', diffLines.join('\n').replace(/=/g, '=3D'));
+}
