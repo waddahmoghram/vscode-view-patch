@@ -16,6 +16,8 @@ the diff. The extension stays read-only and offline.
 - With a patch open, use the **Open Patch as Changes** button in the editor title bar.
 - Run **View Patch: Open Patch as Changes** from the Command Palette. Pasted, unsaved text also works when its editor
   language is Diff.
+- Drag patch files onto the **Patch Reviews** panel in the Explorer.
+- Run **View Patch: Open Sample Patch** to try the viewer without any repository.
 
 Selecting several files with the ordinary command opens independent reviews. To apply dependent patches in order,
 use the series command below.
@@ -66,6 +68,25 @@ If the combined result has no net changes, the individual patches remain reviewa
 
 A hunk-only series shows individual messages, not a fabricated complete-file or cumulative reconstruction.
 
+## Compare two patch versions
+
+With a complete-file review open, **Compare with Another Patch...** applies the current patch and a second
+file to the same frozen base, then opens the **result difference**: the first version's outcome on the left,
+the second version's on the right. This is how a v2 of a change differs from its v1, not a textual diff of
+the two patch files. Identical outcomes are reported without opening an empty review. A comparison cannot be
+refreshed or rebased; run the command again.
+
+## Merge commits
+
+A combined merge diff (`git show` of a merge, `diff --cc`) is never applied as text. When the named commit
+exists in a known repository, View Patch shows the merge's real changes **versus each parent**, read from
+history. When the repository is not available, hunk-only mode shows explicit per-parent hunk views instead.
+
+## Mailed patches
+
+Message bodies encoded as `quoted-printable` or `base64` are decoded before parsing, so mailed patches with
+encoded diffs review normally. Unsupported encodings and multipart mail are rejected with the reason named.
+
 ## Summary, checklist, and refresh
 
 Expand **Patch Reviews** in the Explorer, or run **View Patch: Show Patch Reviews**.
@@ -74,7 +95,10 @@ The panel divider can be dragged upward to give a large checklist more room.
 
 - See the repository, base, subject, author, date, and added/modified/deleted/renamed file counts.
 - Filter old and new paths with the filter button.
-- Toggle each file's **reviewed** checkmark. Selecting a file opens its individual diff.
+- Toggle each file's **reviewed** checkmark. Selecting a file opens its individual diff. **Mark All Reviewed**
+  and **Clear Reviewed Checkmarks** work on the whole review, and the view's badge counts unreviewed files.
+- **Copy Review Summary as Markdown** copies the repository, base, file list, and checkmarks for pasting
+  into a report or chat.
 - Inspect mode changes, submodule pointers, and renames without edits as explicit metadata entries rather than
   temporary notifications.
 - Reopening the same source reuses its review instead of accumulating duplicate tabs.
@@ -83,9 +107,12 @@ The panel divider can be dragged upward to give a large checklist more room.
 
 Refresh keeps the selected repository and base expression. Checkmarks survive only for changes whose contents and
 metadata are unchanged. Series navigation replaces the review's current Changes tab rather than opening a tab per
-message.
+message. Regenerating the source patch outside the editor offers the same refresh as saving it in the editor;
+the open snapshot is never silently replaced.
 
-Review contents and checkmarks live only in this window. After restarting or reloading VS Code, open the patch again.
+Reviews are also remembered across reloads: reopening an unchanged patch restores its reviewed checkmarks and
+retries the previously chosen repository and base first, and **Reopen Recent Patch...** lists recent reviews,
+including series. The remembered list stays on this machine.
 
 ## Read-only, bounded operation
 
@@ -123,13 +150,18 @@ a leading `~` in an extra repository path means your home folder.
 - Git on `PATH`, or configured through `git.path`, for complete-file reviews.
 - Workspace trust for Git-backed reviews. Hunk-only views work in Restricted Mode.
 - In a remote window, the extension and Git-backed operations run next to the remote repositories.
-- Git and standard unified diffs are supported. Malformed/truncated hunks and combined merge diffs are rejected
-  explicitly. Encoded mail bodies are not decoded.
+- In VS Code for the Web and virtual workspaces, hunk-only reviews work; Git-backed reviews need a desktop
+  window with a local repository. Web support is new in this release and still being exercised.
+- Git and standard unified diffs are supported, including combined merge diffs as described above.
+  Malformed or truncated hunks are rejected explicitly. `quoted-printable` and `base64` mail bodies are
+  decoded; other encodings and multipart mail are rejected with the reason named.
 
 ## Privacy and troubleshooting
 
 View Patch does not collect telemetry, contact a hosting service, or fetch missing objects. The **View Patch** output
 channel (**View** > **Output**) explains repository selection, cancellation, limits, and Git failures.
+For a bug report, **View Patch: Copy Diagnostics** puts the version, editor, platform, and Git details on the
+clipboard, and **Open Sample Patch** checks an install without touching any repository.
 
 ## License
 

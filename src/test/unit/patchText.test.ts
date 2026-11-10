@@ -288,6 +288,181 @@ describe('splitPatchMessages', () => {
     });
 });
 
+describe('splitPatchMessages transfer decoding', () => {
+    function encodedMail(extra: readonly string[], body: string, subject = '[PATCH] Encoded'): string {
+        return [
+            `From ${FIRST} Mon Sep 17 00:00:00 2001`,
+            'From: Sample Author <author@example.test>',
+            `Date: ${DATE}`,
+            `Subject: ${subject}`,
+            ...extra,
+            '',
+            body,
+        ].join('\n');
+    }
+
+    const QP_DIFF = [
+        '=64iff --git a/qp.txt b/qp.txt',
+        'index 1111111..2222222 100644',
+        '=2D-- a/qp.txt',
+        '+++ b/qp.txt',
+        '@@ -1 +1 @@',
+        '-value =3D one  ',
+        '+caf=C3=A9 =3D tw=',
+        'o',
+        '',
+    ].join('\n');
+
+    test('decodes a quoted-printable format-patch so its diff only then becomes visible', () => {
+        const hidden = Buffer.from(encodedMail(['Content-Transfer-Encoding: 7bit'], QP_DIFF));
+        assert.equal(splitPatchMessages(hidden)[0].hasDiff, false);
+        const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: quoted-printable'], QP_DIFF));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.hasDiff, true);
+        assert.equal(message.encodingError, undefined);
+        assert.deepEqual(message.bytes, input);
+        const decoded = message.decodedBytes?.toString() ?? '';
+        assert.match(decoded, /^From 1234/);
+        assert.match(decoded, /\ndiff --git a\/qp\.txt b\/qp\.txt\n/);
+        assert.match(decoded, /\n-value = one\n/);
+        assert.match(decoded, /\n\+café = two\n/);
+        const parts = parseHunks(input);
+        assert.equal(parts[0].files[0].newPath, 'qp.txt');
+        assert.match(parts[0].files[0].after?.toString() ?? '', /\ncafé = two\n$/);
+    });
+
+    test('decodes quoted-printable soft breaks and hard endings in carriage-return mail', () => {
+        const input = Buffer.from(
+            encodedMail(['Content-Transfer-Encoding: quoted-printable'], QP_DIFF).replace(/\n/g, '\r\n'));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.hasDiff, true);
+        assert.deepEqual(message.bytes, input);
+        assert.match(message.decodedBytes?.toString() ?? '', /\n\+café = two\r\n/);
+        assert.match(parseHunks(input)[0].files[0].after?.toString() ?? '', /\ncafé = two\r\n$/);
+    });
+
+    test('decodes quoted-printable byte-exactly and keeps invalid escapes literal', () => {
+        const cases: readonly [string, string][] = [
+            ['plain =3D equals\n', 'plain = equals\n'],
+            ['lower =4a hex\n', 'lower J hex\n'],
+            ['soft wra=\np\n', 'soft wrap\n'],
+            ['padding   \nnext\n', 'padding\nnext\n'],
+            ['padded soft =  \nbreak\n', 'padded soft break\n'],
+            ['invalid =zz stays\n', 'invalid =zz stays\n'],
+            ['hard space =20\n', 'hard space  \n'],
+            ['tab\tkept inside\n', 'tab\tkept inside\n'],
+            ['trailing =', 'trailing ='],
+        ];
+        for (const [encoded, decoded] of cases) {
+            const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: quoted-printable'], encoded));
+            const body = splitPatchMessages(input)[0].decodedBytes?.toString('latin1') ?? '';
+            assert.equal(body.slice(body.indexOf('\n\n') + 2), decoded, JSON.stringify(encoded));
+        }
+    });
+
+    test('emits decoded bytes verbatim without charset reinterpretation', () => {
+        const input = Buffer.from(
+            encodedMail(['Content-Transfer-Encoding: quoted-printable'], 'byte =FF out\n'));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.decodedBytes?.includes(Buffer.from([0x62, 0x79, 0x74, 0x65, 0x20, 0xff])), true);
+        assert.throws(() => parseHunks(input), (error: unknown) =>
+            error instanceof PatchParseError && /decoded message body is not valid UTF-8/.test(error.message));
+    });
+
+    test('decodes base64 bodies, tolerating wrapped lines and whitespace', () => {
+        const body = Buffer.from(diff()).toString('base64').replace(/(.{48})/g, '$1\n');
+        const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: base64'], `${body}\n`));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.hasDiff, true);
+        assert.deepEqual(message.bytes, input);
+        assert.match(message.decodedBytes?.toString() ?? '', /\ndiff --git a\/sample\.txt/);
+        assert.equal(onlyFile(input).newPath, 'sample.txt');
+    });
+
+    test('keeps raw bytes and boundaries stable in a mixed-encoding mailbox', () => {
+        const first = encodedMail(['Content-Transfer-Encoding: base64'],
+            `${Buffer.from(diff()).toString('base64')}\n`, '[PATCH 1/2] Encoded');
+        const second = mail('[PATCH 2/2] Plain', diff(undefined, 'second.txt'), SECOND);
+        const input = Buffer.from(first + second);
+        const messages = splitPatchMessages(input);
+        assert.equal(messages.length, 2);
+        assert.deepEqual(Buffer.concat(messages.map(message => message.bytes)), input);
+        assert.notEqual(messages[0].decodedBytes, undefined);
+        assert.equal(messages[1].decodedBytes, undefined);
+        assert.deepEqual(messages.map(message => message.hasDiff), [true, true]);
+        const parts = parseHunks(input);
+        assert.deepEqual(parts.map(part => part.files[0].newPath), ['sample.txt', 'second.txt']);
+    });
+
+    test('keeps a base64 cover letter diff-free after decoding', () => {
+        const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: base64'],
+            `${Buffer.from('Just an introduction.\n').toString('base64')}\n`, '[PATCH 0/1] Cover'));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.hasDiff, false);
+        assert.equal(message.encodingError, undefined);
+        assert.equal(message.metadata.index, 0);
+    });
+
+    test('passes 7bit, 8bit, and binary bodies through without a decoded copy', () => {
+        for (const encoding of ['7bit', '8bit', 'binary', '8BIT']) {
+            const input = Buffer.from(encodedMail([`Content-Transfer-Encoding: ${encoding}`], diff()));
+            const [message] = splitPatchMessages(input);
+            assert.equal(message.decodedBytes, undefined, encoding);
+            assert.equal(message.encodingError, undefined, encoding);
+            assert.equal(message.hasDiff, true, encoding);
+            assert.deepEqual(message.bytes, input);
+        }
+    });
+
+    test('matches transfer encodings case-insensitively and trims header padding', () => {
+        const qp = Buffer.from(encodedMail(['Content-Transfer-Encoding:  Quoted-Printable '], 'a =3D b\n'));
+        assert.match(splitPatchMessages(qp)[0].decodedBytes?.toString() ?? '', /a = b/);
+        const b64 = Buffer.from(encodedMail(['Content-Transfer-Encoding: BASE64'],
+            `${Buffer.from('plain\n').toString('base64')}\n`));
+        assert.match(splitPatchMessages(b64)[0].decodedBytes?.toString() ?? '', /plain/);
+    });
+
+    test('flags an unrecognized transfer encoding per message instead of guessing', () => {
+        const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: x-uuencode'], diff()));
+        const [message] = splitPatchMessages(input);
+        assert.match(message.encodingError ?? '', /x-uuencode/);
+        assert.equal(message.decodedBytes, undefined);
+        assert.equal(message.hasDiff, true);
+        assert.deepEqual(message.bytes, input);
+        assert.throws(() => parseHunks(input), (error: unknown) =>
+            error instanceof PatchParseError && /x-uuencode/.test(error.message));
+    });
+
+    test('rejects multipart MIME explicitly rather than guessing at parts', () => {
+        const input = Buffer.from(encodedMail(
+            ['Content-Type: multipart/mixed; boundary="b"'], `--b\n${diff()}--b--\n`));
+        const [message] = splitPatchMessages(input);
+        assert.match(message.encodingError ?? '', /multipart\/mixed/);
+        assert.equal(message.decodedBytes, undefined);
+        assert.throws(() => parseHunks(input), (error: unknown) =>
+            error instanceof PatchParseError && /Multipart MIME/.test(error.message));
+    });
+
+    test('flags malformed base64 bodies without inventing bytes', () => {
+        for (const body of ['not*base64!\n', 'AAAAA\n']) {
+            const input = Buffer.from(encodedMail(['Content-Transfer-Encoding: base64'], body));
+            const [message] = splitPatchMessages(input);
+            assert.match(message.encodingError ?? '', /base64/);
+            assert.equal(message.decodedBytes, undefined);
+            assert.throws(() => parseHunks(input), /base64/);
+        }
+    });
+
+    test('accepts an ordinary Content-Type and ignores unrelated headers', () => {
+        const input = Buffer.from(encodedMail(
+            ['Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: 8bit'], diff()));
+        const [message] = splitPatchMessages(input);
+        assert.equal(message.encodingError, undefined);
+        assert.equal(message.hasDiff, true);
+        assert.equal(onlyFile(input).newPath, 'sample.txt');
+    });
+});
+
 describe('parseHunks partial-context rendering', () => {
     test('shows only supplied lines and explicit original/new ranges with omitted-context separators', () => {
         const file = onlyFile(diff('@@ -10,2 +10,2 @@ context\n keep\n-old\n+new\n'

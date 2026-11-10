@@ -9,7 +9,7 @@ export interface ViewPatchApi {
 
 export function activate(context: vscode.ExtensionContext): ViewPatchApi {
     const log = vscode.window.createOutputChannel('View Patch', { log: true });
-    const reviews = new ReviewController(log);
+    const reviews = new ReviewController(log, context.globalState);
     context.subscriptions.push(
         log,
         reviews,
@@ -30,6 +30,13 @@ export function activate(context: vscode.ExtensionContext): ViewPatchApi {
         'viewPatch.closeReview': value => reviews.close(value),
         'viewPatch.showSummary': () => reviews.reveal(),
         'viewPatch.listReviews': () => reviews.list(),
+        'viewPatch.openSample': () => reviews.openSample(),
+        'viewPatch.openRecent': () => reviews.openRecent(),
+        'viewPatch.copyDiagnostics': () => reviews.copyDiagnostics(),
+        'viewPatch.exportSummary': value => reviews.exportSummary(value),
+        'viewPatch.markAllReviewed': value => reviews.markAllReviewed(value),
+        'viewPatch.clearReviewed': value => reviews.clearReviewed(value),
+        'viewPatch.compareWith': (value, other) => reviews.compareWith(value, other),
     };
     for (const [command, handler] of Object.entries(commands)) {
         context.subscriptions.push(vscode.commands.registerCommand(

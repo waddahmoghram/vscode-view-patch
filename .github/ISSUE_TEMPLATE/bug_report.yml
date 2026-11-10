@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a View Patch problem. The extension is a pre-release; precise reports drive the next pre-release.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: View Patch version and install source
+      description: Extensions view > View Patch. Say whether it came from the Marketplace or a .vsix file.
+      placeholder: 0.2.1 pre-release from the Marketplace
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Editor version, operating system, and window kind
+      description: Help > About, the operating system, and whether the window is local, Remote-SSH, WSL, or a container.
+      placeholder: VS Code 1.145.3 on Windows 11, Remote-SSH to Ubuntu 22.04
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command or button used
+      placeholder: Open Patch as Changes (Explorer right-click)
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened, and what you expected instead
+      description: Include any error message text exactly.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: View Patch output log
+      description: View > Output, pick "View Patch" in the dropdown, and paste the lines from the failing attempt.
+        It records repository discovery, base selection, limits, and Git failures.
+      render: text
+  - type: input
+    id: review
+    attributes:
+      label: Repository, base, and mode
+      description: The Repository/Base lines from the Patch Reviews summary, and whether the view was complete files or hunks only.
+      placeholder: Repository /home/me/project, base abc1234^, complete files
+  - type: textarea
+    id: patch
+    attributes:
+      label: Minimal patch that reproduces it
+      description: A small neutral patch if possible. Do not paste proprietary code, private paths, or credentials.
+      render: diff
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Content check
+      options:
+        - label: This report contains no proprietary code, private hostnames or paths, or credentials.
+          required: true

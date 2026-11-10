@@ -104,6 +104,7 @@ describe('sequential patch series', () => {
         assert.equal(applied.changes[0]?.before, undefined);
         assert.equal(applied.changes[0]?.after, file(second, 'created.txt').after);
         assert.equal(applied.baseTree, git(fixture.repo, 'rev-parse', `${fixture.base}^{tree}`).trim());
+        assert.equal(applied.resultTree, git(fixture.repo, 'rev-parse', 'HEAD^{tree}').trim());
         for (const [index, part] of (applied.parts ?? []).entries()) {
             assert.equal(part.metadata.commit, fixture.commits[index]);
             assert.match(part.metadata.subject ?? '', new RegExp(`Step ${index + 1}$`));

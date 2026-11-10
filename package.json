@@ -2,7 +2,7 @@
   "name": "view-patch",
   "displayName": "View Patch",
   "description": "Review patches and patch series side by side, with complete Git-backed files or explicit repository-free hunk views.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "waddahmoghram",
   "author": "Waddah Moghram",
   "license": "MIT",
@@ -40,13 +40,17 @@
       "supported": "limited",
       "description": "Complete-file reviews run Git and require trust. Hunk-only views work without trust or Git."
     },
-    "virtualWorkspaces": false
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Hunk-only reviews work on virtual files; complete-file reviews need a local Git repository."
+    }
   },
   "activationEvents": [
     "onCustomEditor:viewPatch.editor",
     "onView:viewPatch.reviews"
   ],
   "main": "./out/extension.js",
+  "browser": "./dist/web/extension.js",
   "contributes": {
     "commands": [
       {
@@ -113,6 +117,45 @@
         "title": "Close Review",
         "category": "View Patch",
         "icon": "$(close)"
+      },
+      {
+        "command": "viewPatch.openRecent",
+        "title": "Reopen Recent Patch...",
+        "category": "View Patch",
+        "icon": "$(history)"
+      },
+      {
+        "command": "viewPatch.compareWith",
+        "title": "Compare with Another Patch...",
+        "category": "View Patch",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "viewPatch.exportSummary",
+        "title": "Copy Review Summary as Markdown",
+        "category": "View Patch",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "viewPatch.markAllReviewed",
+        "title": "Mark All Reviewed",
+        "category": "View Patch",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "viewPatch.clearReviewed",
+        "title": "Clear Reviewed Checkmarks",
+        "category": "View Patch"
+      },
+      {
+        "command": "viewPatch.openSample",
+        "title": "Open Sample Patch",
+        "category": "View Patch"
+      },
+      {
+        "command": "viewPatch.copyDiagnostics",
+        "title": "Copy Diagnostics",
+        "category": "View Patch"
       }
     ],
     "customEditors": [
@@ -191,6 +234,26 @@
           "command": "viewPatch.refresh",
           "when": "view == viewPatch.reviews && viewPatch.hasReviews",
           "group": "navigation@3"
+        },
+        {
+          "command": "viewPatch.exportSummary",
+          "when": "view == viewPatch.reviews && viewPatch.hasReviews",
+          "group": "1_manage@1"
+        },
+        {
+          "command": "viewPatch.markAllReviewed",
+          "when": "view == viewPatch.reviews && viewPatch.hasReviews",
+          "group": "1_manage@2"
+        },
+        {
+          "command": "viewPatch.clearReviewed",
+          "when": "view == viewPatch.reviews && viewPatch.hasReviews",
+          "group": "1_manage@3"
+        },
+        {
+          "command": "viewPatch.openRecent",
+          "when": "view == viewPatch.reviews",
+          "group": "1_manage@4"
         }
       ],
       "view/item/context": [
@@ -208,6 +271,26 @@
           "command": "viewPatch.changeBase",
           "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
           "group": "review@1"
+        },
+        {
+          "command": "viewPatch.compareWith",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "review@2"
+        },
+        {
+          "command": "viewPatch.exportSummary",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "review@3"
+        },
+        {
+          "command": "viewPatch.markAllReviewed",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "review@4"
+        },
+        {
+          "command": "viewPatch.clearReviewed",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "review@5"
         },
         {
           "command": "viewPatch.closeReview",
@@ -264,12 +347,14 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && npm run compile:web",
     "compile": "tsc -p ./",
+    "compile:web": "node esbuild.web.mjs",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test \"out/test/unit/**/*.test.js\"",
+    "test:unit:coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"out/test/**\" \"out/test/unit/**/*.test.js\"",
     "test:integration": "npm run test:editor && npm run test:restricted",
     "test:editor": "vscode-test",
     "test:restricted": "node scripts/test-restricted.mjs",
@@ -282,6 +367,8 @@
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.1.0",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "overrides": {
