@@ -279,6 +279,17 @@ describe('bounded Git execution', () => {
         });
     });
 
+    test('preserves Git failure diagnostics when a platform reports the closed pipe differently', async context => {
+        trackChild(context, child => {
+            child.stdin.emit('error', Object.assign(new Error('fixture write EOF'), { code: 'EOF' }));
+        });
+        await assert.rejects(fixtureGit.run([], options('early-failure', {
+            input: 'x',
+        })), (error: unknown) => {
+            return error instanceof GitError && error.exitCode === 7 && error.message === 'fixture failure';
+        });
+    });
+
     test('rejects an incomplete input even if the child exits successfully', async () => {
         await assert.rejects(fixtureGit.run([], options('early-success', {
             input: Buffer.alloc(4 * 1024 * 1024),

@@ -9,6 +9,7 @@
 - Keep open reviews intact beyond twenty views and release content after the last owned tab closes.
 - Show binary fingerprints, marked text encodings, and persistent rename/mode/submodule metadata.
 - Cancel and time-bound Git operations, enforce input/output/content budgets, and prevent lazy object fetching.
+- Keep Git's own diagnostics when it closes a large input early, whatever error code the platform reports.
 - Strengthen scratch-object isolation and test source repository bytes, modes, and timestamps for invariance.
 - Gate publishing on all supported-platform checks, including the oldest supported editor and real Restricted Mode.
 
