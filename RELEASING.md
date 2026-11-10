@@ -14,7 +14,8 @@ that VS Code-compatible editors such as VSCodium use.
 
 1. Sign in to the [Marketplace publisher page](https://marketplace.visualstudio.com/manage) with a Microsoft account and
    create a publisher whose identifier is `waddahmoghram`, the `publisher` value in `package.json`. The identifier
-   cannot be changed later.
+   cannot be changed later. Only the identifier and name are required. Leave any website or **Verified domain** field
+   empty unless you own an eligible domain; the optional verified badge also needs six months of Marketplace history.
 1. On that publisher, open **Trusted Publishing** and create a policy, so the Publish workflow can sign in without a
    stored token:
 
