@@ -36,6 +36,9 @@ When a `git format-patch` or `git show` file names a commit present in one of th
 commit's parent. Otherwise, View Patch tries `HEAD` in the candidate repositories and asks when several apply.
 The summary shows both the requested base and its frozen snapshot tree identifier.
 
+An open workspace folder is not required: in an empty window, the patch file's folder and `viewPatch.repositories`
+still locate the repository, and [hunk-only views](#review-hunks-without-a-repository) need none at all.
+
 Use **Open Patch as Changes on a Repository and Base...**, or **Change Repository and Base...** on a review, to
 choose a repository and revision yourself.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Pin the empty-window contract with integration tests: with no workspace folder and no configured repositories,
+  complete-file reviews find the repository through the patch file's own folder, and hunk-only reviews still work.
+- Document that an open workspace folder is optional.
+
 ## 0.2.0
 
 - Add opt-in **Open With** and explicit repository-free, partial-context hunk views.
