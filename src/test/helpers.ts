@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, promises as fs, realpathSync, rmSync, writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -37,9 +37,14 @@ export function tempDir(prefix = 'view-patch-test-'): string {
     return dir;
 }
 
-export function removeTempDirs(): void {
-    for (const dir of made.splice(0)) {
-        rmSync(dir, { recursive: true, force: true });
+export async function removeTempDirs(): Promise<void> {
+    // Not rmSync: inside VS Code on Windows, its C++ library cannot delete Git's read-only object files.
+    const results = await Promise.allSettled(made.splice(0).map(dir => fs.rm(dir, {
+        recursive: true, force: true, maxRetries: 5, retryDelay: 100,
+    })));
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) {
+        throw failed.reason;
     }
 }
 

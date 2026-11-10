@@ -57,5 +57,6 @@ try {
     process.exitCode = Number(code);
 } finally {
     clearTimeout(timer);
-    await rm(profile, { recursive: true, force: true });
+    // Windows can briefly keep profile files open after the editor exits.
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

@@ -37,7 +37,7 @@ suite('View Patch commands', () => {
 
     suiteTeardown(async () => {
         await settings().update('repositories', undefined, vscode.ConfigurationTarget.Global);
-        removeTempDirs();
+        await removeTempDirs();
     });
 
     function patchFile(text = formatPatch(repo, commit), name?: string): vscode.Uri {
@@ -67,8 +67,8 @@ suite('View Patch commands', () => {
         assert.strictEqual(reviewTabs(shown).length, 1);
         const root = api.reviews.tree.getChildren()[0];
         const summary = api.reviews.tree.getChildren(root).filter(node => node.kind === 'info').map(nodeLabel);
-        assert.ok(summary.some(label => label.includes(repo)));
-        assert.ok(summary.some(label => label.includes(`${commit}^`)));
+        assert.ok(summary.includes(`Repository: ${shown.repo}`), summary.join('\n'));
+        assert.ok(summary.includes(`Base: ${commit}^`), summary.join('\n'));
         const details = api.reviews.tree.getChildren(root).find(node => node.kind === 'details');
         assert.ok(details);
         assert.ok(api.reviews.tree.getChildren(details).some(node => nodeLabel(node).includes('Snapshot tree:')));
