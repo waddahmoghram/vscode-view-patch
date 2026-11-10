@@ -10,6 +10,14 @@ updates:
     groups:
       development-tools:
         dependency-type: development
+    ignore:
+      # The editor-API types floor must equal engines.vscode (the oldest supported
+      # editor); vsce package rejects anything newer. Bump it only with the engine.
+      - dependency-name: '@types/vscode'
+      # Node types track the oldest supported extension host's runtime, not the
+      # newest release; majors are a deliberate, tested change.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:

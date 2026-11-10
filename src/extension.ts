@@ -37,6 +37,11 @@ export function activate(context: vscode.ExtensionContext): ViewPatchApi {
         'viewPatch.markAllReviewed': value => reviews.markAllReviewed(value),
         'viewPatch.clearReviewed': value => reviews.clearReviewed(value),
         'viewPatch.compareWith': (value, other) => reviews.compareWith(value, other),
+        'viewPatch.openFromClipboard': () => reviews.openFromClipboard(),
+        'viewPatch.reviewCommit': (repo, revision) => reviews.reviewCommit(repo, revision),
+        'viewPatch.nextUnreviewed': value => reviews.nextUnreviewed(value),
+        'viewPatch.previousUnreviewed': value => reviews.previousUnreviewed(value),
+        'viewPatch.copyFileDiff': value => reviews.copyFileDiff(value),
     };
     for (const [command, handler] of Object.entries(commands)) {
         context.subscriptions.push(vscode.commands.registerCommand(

@@ -15,7 +15,7 @@ import {
     positiveLimit,
     throwIfAborted,
 } from './operations';
-import { AppliedPatch, applyPatch, ChangeStatus, compareApplied, looksLikePatch, mergeChanges, patchCommit, SkippedChange } from './patch';
+import { AppliedPatch, applyPatch, ChangeStatus, commitChanges, compareApplied, FileDiffInput, fileDiffStats, looksLikePatch, mergeChanges, patchCommit, SkippedChange, unifiedFileDiff } from './patch';
 import { hasCombinedDiff, HunkFile, parseCombinedParts, parseHunks, PatchMetadata, splitPatchMessages } from './patchText';
 import { findRepositories, hasCommit, isRevision, parentOf, PatchTarget, resolvePatch, topLevel } from './repositories';
 import {
@@ -81,6 +81,7 @@ interface RecentPatch {
     readonly repo?: string;
     readonly base?: string;
     readonly members?: readonly string[];
+    readonly commit?: string;
     readonly reviewed: readonly string[];
     readonly when: number;
 }
@@ -88,6 +89,7 @@ interface RecentPatch {
 const RECENT_KEY = 'recentPatches';
 const RECENT_LIMIT = 25;
 const COMPARE_SCHEME = 'view-patch-compare';
+const COMMIT_SCHEME = 'view-patch-commit';
 
 const CHOOSE = 'Choose Repository and Base...';
 const HUNKS_ONLY = 'View Hunks Only';
@@ -168,6 +170,12 @@ export class ReviewController implements vscode.Disposable {
             throw new Error('A version comparison has no single source patch to refresh.'
                 + ' Run Compare with Another Patch again.');
         }
+        if (review.source.uri.scheme === COMMIT_SCHEME) {
+            if (!review.repo || !review.digest) {
+                throw new Error('This commit review cannot refresh. Run Review a Commit again.');
+            }
+            return this.runCommitReview(review.repo, review.digest);
+        }
         return this.run(review.source.uri, review.mode === 'partial' ? 'partial' : 'auto', true);
     }
 
@@ -206,6 +214,9 @@ export class ReviewController implements vscode.Disposable {
             throw new Error('A version comparison is tied to the base it was built on.'
                 + ' Run Compare with Another Patch from a review on the wanted base.');
         }
+        if (review.source.uri.scheme === COMMIT_SCHEME) {
+            throw new Error('A commit review is pinned to its commit. Run Review a Commit for another revision.');
+        }
         return this.run(review.source.uri, 'choose', true);
     }
 
@@ -239,6 +250,16 @@ export class ReviewController implements vscode.Disposable {
             await waitForTab(() => allTabs().some(tab => isSingleFileTab(tab)
                 && tabUris(tab).some(uri => snapshotId(uri) === review.id)));
             review.seen = true;
+            review.lastOpened = ref.fileIndex;
+            if (vscode.workspace.getConfiguration('viewPatch').get<boolean>('markReviewedOnOpen', false)) {
+                const section = review.sections.find(item => item.key === ref.sectionKey);
+                const file = section?.files[ref.fileIndex];
+                if (section && file) {
+                    review.reviewed.add(reviewFileKey(section.key, file));
+                    void this.rememberReview(review);
+                    this.refreshTree();
+                }
+            }
         } finally {
             review.opening = false;
         }
@@ -304,14 +325,17 @@ export class ReviewController implements vscode.Disposable {
         if (review.sourceChanged) {
             lines.push('- Note: the source patch changed after this snapshot was taken.');
         }
+        const stats = await this.summaryStats(review);
         for (const section of review.sections) {
             const reviewed = section.files.filter(
                 file => review.reviewed.has(reviewFileKey(section.key, file))).length;
             lines.push('', `## ${section.label} (${section.files.length} files, ${reviewed} reviewed)`, '');
-            for (const file of section.files) {
+            for (const [index, file] of section.files.entries()) {
                 const checked = review.reviewed.has(reviewFileKey(section.key, file));
                 const name = file.oldPath === file.newPath ? file.newPath : `${file.oldPath} -> ${file.newPath}`;
-                lines.push(`- [${checked ? 'x' : ' '}] \`${name}\` ${fileStatusLabel(file)}`);
+                const counts = stats?.get(`${section.key}\0${index}`);
+                const suffix = counts ? ` (+${counts.insertions}/-${counts.deletions})` : '';
+                lines.push(`- [${checked ? 'x' : ' '}] \`${name}\` ${fileStatusLabel(file)}${suffix}`);
             }
         }
         const text = `${lines.join('\n')}\n`;
@@ -340,6 +364,10 @@ export class ReviewController implements vscode.Disposable {
         if (picked.entry.members) {
             return this.openSeries(undefined, picked.entry.members.map(member => vscode.Uri.parse(member)));
         }
+        if (picked.entry.commit && picked.entry.repo) {
+            const shown = await this.runCommitReview(picked.entry.repo, picked.entry.commit);
+            return shown ? [shown] : [];
+        }
         const shown = await this.run(
             vscode.Uri.parse(picked.entry.uri),
             picked.entry.mode === 'partial' ? 'partial' : 'auto',
@@ -351,6 +379,199 @@ export class ReviewController implements vscode.Disposable {
         const document = await vscode.workspace.openTextDocument({ language: 'diff', content: SAMPLE_PATCH });
         const shown = await this.run(document.uri, 'partial');
         return shown ? [shown] : [];
+    }
+
+    async openFromClipboard(): Promise<ShownPatch[]> {
+        const text = await vscode.env.clipboard.readText();
+        if (!text.trim() || !looksLikePatch(text)) {
+            void vscode.window.showWarningMessage(
+                'View Patch: the clipboard does not contain a recognizable patch.'
+                + ' Expected Git or unified-diff file headers.');
+            return [];
+        }
+        const document = await vscode.workspace.openTextDocument({ language: 'diff', content: text });
+        const shown = await this.run(document.uri, 'auto');
+        return shown ? [shown] : [];
+    }
+
+    /** Reviews any commit from history: no patch file, per-parent sections for merges. */
+    async reviewCommit(repoArg?: unknown, revisionArg?: unknown): Promise<ShownPatch | undefined> {
+        const api = await this.gitApi();
+        const git = new Git(gitExecutable(api));
+        const probe = new AbortController();
+        try {
+            const options = configuredOptions(probe.signal);
+            let repo: string | undefined;
+            if (isUri(repoArg) || typeof repoArg === 'string') {
+                const folder = isUri(repoArg) ? repoArg.fsPath : repoArg;
+                repo = await topLevel(git, folder, options);
+                if (!repo) {
+                    throw new Error('That folder is not in a Git repository.');
+                }
+            } else {
+                const candidates = await findRepositories(git, knownFolders(api), options);
+                const picked = await vscode.window.showQuickPick([
+                    ...candidates.map(folder => ({ label: path.basename(folder), description: folder, folder })),
+                    { label: '$(folder-opened) Browse...', description: '', folder: '' },
+                ], { title: 'View Patch: repository holding the commit' });
+                if (!picked) {
+                    return undefined;
+                }
+                repo = picked.folder;
+                if (!repo) {
+                    const folders = await vscode.window.showOpenDialog({
+                        canSelectFiles: false, canSelectFolders: true, openLabel: 'Use This Repository',
+                    });
+                    if (!folders) {
+                        return undefined;
+                    }
+                    repo = await topLevel(git, folders[0].fsPath, options);
+                    if (!repo) {
+                        throw new Error('That folder is not in a Git repository.');
+                    }
+                }
+            }
+            let revision: string;
+            if (typeof revisionArg === 'string' && revisionArg.trim()) {
+                revision = revisionArg.trim();
+            } else {
+                const typed = (await vscode.window.showInputBox({
+                    title: `View Patch: commit to review in ${path.basename(repo)}`,
+                    prompt: 'A commit hash, branch, tag, or revision expression.',
+                    value: 'HEAD',
+                    validateInput: async value => await isRevision(git, repo, value.trim(), options)
+                        ? undefined : `"${value.trim()}" is not a revision in this repository.`,
+                }))?.trim();
+                if (!typed) {
+                    return undefined;
+                }
+                revision = typed;
+            }
+            return await this.runCommitReview(repo, revision);
+        } catch (error) {
+            this.report(error, 'Review a Commit');
+            return undefined;
+        } finally {
+            probe.abort();
+        }
+    }
+
+    private async runCommitReview(repo: string, revision: string): Promise<ShownPatch | undefined> {
+        const name = `${path.basename(repo)} @ ${revision.slice(0, 40)}`;
+        const aborter = new AbortController();
+        this.aborters.add(aborter);
+        try {
+            return await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `View Patch: ${name}`,
+                cancellable: true,
+            }, async (_progress, token) => {
+                const listener = token.onCancellationRequested(() => aborter.abort());
+                try {
+                    const options = configuredOptions(aborter.signal);
+                    const api = await this.gitApi();
+                    const git = new Git(gitExecutable(api));
+                    const result = await commitChanges(git, repo, revision, options);
+                    throwIfAborted(options.signal);
+                    const sections: ReviewSection[] = result.perParent.map((part, index) => ({
+                        key: index === 0 ? 'combined' : `parent${index + 1}`,
+                        label: part.parent
+                            ? `Versus parent ${index + 1} (${part.parent.slice(0, 12)})`
+                            : 'Versus the empty tree (root commit)',
+                        files: snapshotFiles(part),
+                    }));
+                    const short = result.commit.slice(0, 12);
+                    const data: ReviewData = {
+                        source: {
+                            uri: vscode.Uri.from({
+                                scheme: COMMIT_SCHEME,
+                                path: `/${contentFingerprint(Buffer.from(repo))}/${result.commit}`,
+                            }),
+                            name: `commit ${short}`,
+                        },
+                        digest: result.commit,
+                        mode: 'complete',
+                        sections,
+                        repo,
+                        base: result.parents[0],
+                        metadata: {
+                            commit: result.commit,
+                            subject: result.subject ?? `Commit ${short}`,
+                            author: result.author,
+                            date: result.date,
+                        },
+                    };
+                    const previous = [...this.reviews.values()].find(
+                        item => item.source.uri.toString() === data.source.uri.toString());
+                    return await this.install(data, previous);
+                } finally {
+                    listener.dispose();
+                }
+            });
+        } catch (error) {
+            this.report(error, name);
+            return undefined;
+        } finally {
+            this.aborters.delete(aborter);
+        }
+    }
+
+    nextUnreviewed(reference?: unknown): Promise<void> {
+        return this.stepUnreviewed(reference, 1);
+    }
+
+    previousUnreviewed(reference?: unknown): Promise<void> {
+        return this.stepUnreviewed(reference, -1);
+    }
+
+    private async stepUnreviewed(reference: unknown, direction: 1 | -1): Promise<void> {
+        const review = this.find(reference);
+        const section = review.sections.find(item => item.key === review.section) ?? review.sections[0];
+        if (!section || section.files.length === 0) {
+            throw new Error('This review has no files to step through.');
+        }
+        const count = section.files.length;
+        const start = review.lastOpened ?? (direction === 1 ? -1 : count);
+        for (let step = 1; step <= count; step++) {
+            const index = ((start + direction * step) % count + count) % count;
+            const file = section.files[index];
+            if (!review.reviewed.has(reviewFileKey(section.key, file))) {
+                await this.openFile({ reviewId: review.id, sectionKey: section.key, fileIndex: index });
+                return;
+            }
+        }
+        void vscode.window.showInformationMessage('View Patch: every file in this section is marked reviewed.');
+    }
+
+    /** Copies one file's change as a valid unified diff. Complete reviews only: partial views have no full sides. */
+    async copyFileDiff(reference: unknown): Promise<string> {
+        const ref = reviewReference(reference);
+        const review = this.find(ref);
+        const section = review.sections.find(item => item.key === ref?.sectionKey);
+        const file = ref?.fileIndex === undefined ? undefined : section?.files[ref.fileIndex];
+        if (!section || !file) {
+            throw new Error('Select a file from Patch Reviews first.');
+        }
+        if (review.mode !== 'complete') {
+            throw new Error('Copying a single file diff needs a complete-file review;'
+                + ' a hunk-only view already is the patch content.');
+        }
+        if (file.kind === 'metadata') {
+            throw new Error(`This entry is ${file.note ?? 'metadata only'}; there is no content diff to copy.`);
+        }
+        const api = await this.gitApi();
+        const git = new Git(gitExecutable(api));
+        const aborter = new AbortController();
+        try {
+            const text = await unifiedFileDiff(git, {
+                oldPath: file.oldPath, newPath: file.newPath, before: file.before, after: file.after,
+            }, configuredOptions(aborter.signal));
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.setStatusBarMessage(`View Patch: diff for ${file.newPath} copied.`, 4000);
+            return text;
+        } finally {
+            aborter.abort();
+        }
     }
 
     async copyDiagnostics(): Promise<string> {        const api = await this.gitApi();
@@ -972,6 +1193,7 @@ export class ReviewController implements vscode.Disposable {
                 repo: review.repo,
                 base: review.base,
                 members: review.source.members?.map(member => member.toString()),
+                commit: review.source.uri.scheme === COMMIT_SCHEME ? review.digest : undefined,
                 reviewed: [...review.reviewed],
                 when: Date.now(),
             };
@@ -984,6 +1206,46 @@ export class ReviewController implements vscode.Disposable {
         });
         this.stateWrites = task;
         return task;
+    }
+
+    /** Line counts per content file for complete reviews; absent on any failure rather than blocking the export. */
+    private async summaryStats(review: Review): Promise<Map<string, { insertions: number; deletions: number }> | undefined> {
+        if (review.mode !== 'complete') {
+            return undefined;
+        }
+        const keys: string[] = [];
+        const inputs: FileDiffInput[] = [];
+        for (const section of review.sections) {
+            for (const [index, file] of section.files.entries()) {
+                if (file.kind !== 'metadata') {
+                    keys.push(`${section.key}\0${index}`);
+                    inputs.push({
+                        oldPath: file.oldPath, newPath: file.newPath, before: file.before, after: file.after,
+                    });
+                }
+            }
+        }
+        if (!inputs.length) {
+            return undefined;
+        }
+        const aborter = new AbortController();
+        try {
+            const api = await this.gitApi();
+            const git = new Git(gitExecutable(api));
+            const stats = await fileDiffStats(git, inputs, configuredOptions(aborter.signal));
+            const result = new Map<string, { insertions: number; deletions: number }>();
+            stats.forEach((entry, index) => {
+                if (entry) {
+                    result.set(keys[index], entry);
+                }
+            });
+            return result;
+        } catch (error) {
+            this.log.info(`Summary line counts unavailable: ${firstLines(errorMessage(error))}`);
+            return undefined;
+        } finally {
+            aborter.abort();
+        }
     }
 
     private storedReviewed(data: ReviewData): Set<string> {
@@ -1218,6 +1480,7 @@ function isRecentPatch(value: unknown): value is RecentPatch {
         && typeof entry.when === 'number'
         && (entry.repo === undefined || typeof entry.repo === 'string')
         && (entry.base === undefined || typeof entry.base === 'string')
+        && (entry.commit === undefined || typeof entry.commit === 'string')
         && (entry.members === undefined
             || (Array.isArray(entry.members) && entry.members.every(item => typeof item === 'string')));
 }
@@ -1297,18 +1560,24 @@ function settingBytes(name: string, fallback: number, multiplier: number): numbe
 }
 
 function candidateFolders(source: PatchSource, api: GitApi | undefined): string[] {
-    const folders = api?.repositories.map(repository => repository.rootUri.fsPath) ?? [];
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-        if (folder.uri.scheme === 'file') {
-            folders.push(folder.uri.fsPath);
-        }
-    }
+    const folders = knownFolders(api);
     if (source.folder) {
         folders.push(source.folder);
     }
     for (const member of source.members ?? []) {
         if (member.scheme === 'file') {
             folders.push(path.dirname(member.fsPath));
+        }
+    }
+    return folders;
+}
+
+/** The repository starting points that exist without any patch: Git view, workspace folders, and settings. */
+function knownFolders(api: GitApi | undefined): string[] {
+    const folders = api?.repositories.map(repository => repository.rootUri.fsPath) ?? [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+        if (folder.uri.scheme === 'file') {
+            folders.push(folder.uri.fsPath);
         }
     }
     const extra = vscode.workspace.getConfiguration('viewPatch').get<unknown[]>('repositories', []);

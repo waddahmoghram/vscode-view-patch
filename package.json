@@ -2,7 +2,7 @@
   "name": "view-patch",
   "displayName": "View Patch",
   "description": "Review patches and patch series side by side, with complete Git-backed files or explicit repository-free hunk views.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "waddahmoghram",
   "author": "Waddah Moghram",
   "license": "MIT",
@@ -153,6 +153,36 @@
         "category": "View Patch"
       },
       {
+        "command": "viewPatch.openFromClipboard",
+        "title": "Open Patch from Clipboard",
+        "category": "View Patch",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "viewPatch.reviewCommit",
+        "title": "Review a Commit...",
+        "category": "View Patch",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "viewPatch.nextUnreviewed",
+        "title": "Next Unreviewed File",
+        "category": "View Patch",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "viewPatch.previousUnreviewed",
+        "title": "Previous Unreviewed File",
+        "category": "View Patch",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "viewPatch.copyFileDiff",
+        "title": "Copy Diff for This File",
+        "category": "View Patch",
+        "icon": "$(copy)"
+      },
+      {
         "command": "viewPatch.copyDiagnostics",
         "title": "Copy Diagnostics",
         "category": "View Patch"
@@ -186,7 +216,51 @@
     "viewsWelcome": [
       {
         "view": "viewPatch.reviews",
-        "contents": "Open a patch to review it here.\n[Open Patch as Changes](command:viewPatch.open)\n[View Hunks Only](command:viewPatch.openHunks)"
+        "contents": "Open a patch to review it here.\n[Open Patch as Changes](command:viewPatch.open)\n[View Hunks Only](command:viewPatch.openHunks)\n[Open Sample Patch](command:viewPatch.openSample)\n[Review a Commit...](command:viewPatch.reviewCommit)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "viewPatch.gettingStarted",
+        "title": "Review your first patch",
+        "description": "Open patches as native side-by-side Changes views, honestly and read-only.",
+        "steps": [
+          {
+            "id": "viewPatch.step.sample",
+            "title": "Try the built-in sample",
+            "description": "One command opens a known-good demo patch - no repository or setup needed.\n[Open Sample Patch](command:viewPatch.openSample)",
+            "media": { "markdown": "media/walkthrough/sample.md" },
+            "completionEvents": ["onCommand:viewPatch.openSample"]
+          },
+          {
+            "id": "viewPatch.step.open",
+            "title": "Open a real patch",
+            "description": "Right-click a .patch or .diff file, drag it onto Patch Reviews, or paste patch text.\n[Open Patch from Clipboard](command:viewPatch.openFromClipboard)",
+            "media": { "markdown": "media/walkthrough/open.md" },
+            "completionEvents": ["onCommand:viewPatch.open", "onCommand:viewPatch.openFromClipboard"]
+          },
+          {
+            "id": "viewPatch.step.hunks",
+            "title": "No repository? View hunks only",
+            "description": "An explicitly partial view that never invents missing lines.\n[View Patch Hunks Only](command:viewPatch.openHunks)",
+            "media": { "markdown": "media/walkthrough/hunks.md" },
+            "completionEvents": ["onCommand:viewPatch.openHunks"]
+          },
+          {
+            "id": "viewPatch.step.checklist",
+            "title": "Track your review",
+            "description": "The Patch Reviews panel keeps the repository, base, file list, and reviewed checkmarks - and they survive reloads.\n[Show Patch Reviews](command:viewPatch.showSummary)",
+            "media": { "markdown": "media/walkthrough/checklist.md" },
+            "completionEvents": ["onCommand:viewPatch.showSummary", "onCommand:viewPatch.toggleReviewed"]
+          },
+          {
+            "id": "viewPatch.step.beyond",
+            "title": "Compare versions and review commits",
+            "description": "Diff two patch versions on one base, or review any commit straight from history.\n[Review a Commit...](command:viewPatch.reviewCommit)",
+            "media": { "markdown": "media/walkthrough/beyond.md" },
+            "completionEvents": ["onCommand:viewPatch.compareWith", "onCommand:viewPatch.reviewCommit"]
+          }
+        ]
       }
     ],
     "menus": {
@@ -254,6 +328,11 @@
           "command": "viewPatch.openRecent",
           "when": "view == viewPatch.reviews",
           "group": "1_manage@4"
+        },
+        {
+          "command": "viewPatch.reviewCommit",
+          "when": "view == viewPatch.reviews",
+          "group": "1_manage@5"
         }
       ],
       "view/item/context": [
@@ -261,6 +340,11 @@
           "command": "viewPatch.toggleReviewed",
           "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.file\\./",
           "group": "inline@1"
+        },
+        {
+          "command": "viewPatch.copyFileDiff",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.file\\./",
+          "group": "1_actions@1"
         },
         {
           "command": "viewPatch.refresh",
@@ -311,6 +395,12 @@
           "scope": "machine",
           "markdownDescription": "Extra Git repository folders to look in when a patch's repository is not open in this window. A leading `~` means your home folder."
         },
+        "viewPatch.markReviewedOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "Mark a file's reviewed checkmark automatically when its individual diff is opened from Patch Reviews."
+        },
         "viewPatch.gitTimeoutSeconds": {
           "type": "integer",
           "default": 30,
@@ -358,6 +448,7 @@
     "test:integration": "npm run test:editor && npm run test:restricted",
     "test:editor": "vscode-test",
     "test:restricted": "node scripts/test-restricted.mjs",
+    "test:web": "node scripts/test-web.mjs",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -366,6 +457,7 @@
     "@types/vscode": "~1.90.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^4.1.0",
     "buffer": "^6.0.3",
     "esbuild": "^0.28.2",
