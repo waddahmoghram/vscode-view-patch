@@ -50,6 +50,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Audit dependency vulnerabilities
+        run: npm audit --include=dev
       - run: npx vsce package --out view-patch.vsix
       - uses: actions/upload-artifact@v7
         with:
