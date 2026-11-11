@@ -39,21 +39,27 @@ that VS Code-compatible editors such as VSCodium use.
 
    1. Save the token as the repository secret `OVSX_PAT`. The Publish workflow skips Open VSX when it is not set.
 
-## Preview phase
+## Release channels
 
-Version 0.2.0 is published as a pre-release. Until the first regular release, publish each fix as another pre-release:
+The preview phase ended with the first regular release: 0.2.0 was published as a pre-release, 0.3.0 as a regular
+release, and 0.3.1 as a pre-release. Each version number can be published only once, on one channel.
 
-1. Set the next `version` in `package.json`, such as 0.2.1, and add a section for it to `CHANGELOG.md`.
+To publish a pre-release:
+
+1. Set the next `version` in `package.json` and add a section for it to `CHANGELOG.md`, folding in any `Unreleased`
+   entries.
 1. Commit and push to `main`, without a tag.
 1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases).
 
-A `v` tag publishes a regular release, so do not push one during this phase. For the first regular release, follow
-[Each release](#each-release) with a version higher than the last pre-release, so pre-release users move to it too.
+For a regular release, follow [Each release](#each-release). Running the Publish workflow by hand with **Publish as a
+pre-release** cleared also publishes a regular release, but without a tag or a GitHub release. VS Code moves users to
+the highest available version, so give a regular release a version higher than the latest pre-release for
+pre-release users to move to it too.
 
 ## Each release
 
-1. Set `version` in `package.json` and add a section for it to `CHANGELOG.md`. The Marketplace accepts only
-   `major.minor.patch` versions.
+1. Set `version` in `package.json` and add a section for it to `CHANGELOG.md`, folding in any `Unreleased` entries.
+   The Marketplace accepts only `major.minor.patch` versions.
 1. Commit, tag, and push. For example, for version 1.0.0:
 
    ```bash
