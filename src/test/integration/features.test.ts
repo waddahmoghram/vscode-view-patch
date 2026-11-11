@@ -59,6 +59,8 @@ suite('Review workflow commands', () => {
         const text = await vscode.commands.executeCommand<string>('viewPatch.copyDiagnostics');
         assert.match(text, /^View Patch \d+\.\d+\.\d+/);
         assert.match(text, /Editor: /);
+        assert.ok(text.includes(`Platform: ${process.platform} ${process.arch}; Node ${process.versions.node}\n`),
+            'the desktop extension host has Node, so the platform line must name it');
         assert.match(text, /Git version: git version \d/);
         assert.match(text, /Open reviews: \d+/);
     });
