@@ -74,6 +74,7 @@ Each row names the files that guard a risk and representative tests from them, q
 | R3 | editor | [`src/test/integration/documents.test.ts`](src/test/integration/documents.test.ts) | "keeps content for more than twenty views until explicitly released"; "retains a removed path while its individual document remains open" |
 | R3 | editor | [`src/test/integration/extension.test.ts`](src/test/integration/extension.test.ts) | "retains more than twenty open reviews without losing earlier content"; "retains a review while an individual file diff remains open"; "closing a review does not close an unrelated editor"; "reuses the review and tab when the same patch is opened again" |
 | R4 | editor | [`src/test/integration/extension.test.ts`](src/test/integration/extension.test.ts), [`src/test/integration/documents.test.ts`](src/test/integration/documents.test.ts) | "reads provider-backed patch addresses without treating them as local file paths"; "keeps spaces, non-ASCII names, and reserved address characters in source paths"; "serves absolute paths from plain unified patches without an invalid double-slash address" |
+| R4 | unit | [`src/test/unit/patchText.test.ts`](src/test/unit/patchText.test.ts), [`src/test/unit/combined.test.ts`](src/test/unit/combined.test.ts) | "strips each prefix pair Git writes with diff.mnemonicPrefix, including names with spaces"; "reads a mnemonic header alone when a change has no --- and +++ lines"; "keeps a shared one-letter directory, as in --no-prefix output, instead of treating it as a pair"; "strips the i/ and w/ prefixes of a conflict diff written with diff.mnemonicPrefix" |
 | R5 | unit | [`src/test/unit/webBundle.test.ts`](src/test/unit/webBundle.test.ts) | "web bundle builds, contains no Node built-in requires, and loads without Buffer or process"; "sha256 shim matches node:crypto on all block boundaries and a large input" |
 | R5 | web | [`src/test/web/suite.test.ts`](src/test/web/suite.test.ts) | "openHunks on untitled diff text shows one partial review with readable sides"; "Git-backed auto mode returns no reviews without crashing, and hunks still work"; "diagnostics are produced without Node globals, for bug reports from the web" |
 | R6 | restricted | [`src/test/restricted/run.ts`](src/test/restricted/run.ts) | "real Restricted Mode blocks Git-backed viewing and permits explicit hunk-only reviews." |
@@ -111,7 +112,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                         | Test sources                        | Count |
 | ---------- | ---------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   356 |
+| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   362 |
 | editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
 | restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     5 |
@@ -144,9 +145,11 @@ Not automated:
 
 Known defects:
 
-- Open, found 2026-11-10: the hunk-only parser in [`src/patchText.ts`](src/patchText.ts) strips only `a/` and
-  `b/` path prefixes, so patches written with Git's `diff.mnemonicPrefix` setting (`i/`, `w/`, `c/`, `o/`)
-  display as `i/file` → `w/file`. No test covers this yet.
+- Fixed in 0.3.3, found 2026-11-10: the hunk-only parser in [`src/patchText.ts`](src/patchText.ts) stripped only
+  `a/` and `b/` path prefixes, so patches written with Git's `diff.mnemonicPrefix` setting (`i/`, `w/`, `c/`,
+  `o/`, and `--no-index`'s `1/` and `2/`) displayed as `i/file` → `w/file`, and a header-only change to a name
+  with spaces split at the first space. The R4 unit tests above now cover each pair Git 2.34.1 was observed to
+  write, merge-conflict diffs, and a shared one-letter directory that must keep its name.
 - Fixed in f60d720: **Copy Diagnostics** failed in VS Code for the Web because it read Node.js process details.
   The web test "diagnostics are produced without Node globals, for bug reports from the web" now covers it,
   alongside the desktop editor test "copies diagnostics that identify the install without running a review".

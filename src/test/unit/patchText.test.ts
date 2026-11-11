@@ -695,6 +695,53 @@ describe('parseHunks file kinds and names', () => {
             + 'index 0000000..1111111\n--- /dev/null\n+++ b/file.txt\n@@ -0,0 +1 @@\n+new\n');
         assert.equal(added.newPath, 'b/file.txt');
     });
+
+    test('strips each prefix pair Git writes with diff.mnemonicPrefix, including names with spaces', () => {
+        const pairs = [['i/', 'w/'], ['w/', 'i/'], ['c/', 'w/'], ['w/', 'c/'], ['c/', 'i/'], ['i/', 'c/'], ['o/', 'w/']];
+        for (const [old, next] of pairs) {
+            const file = onlyFile(`diff --git ${old}my file.txt ${next}my file.txt\n`
+                + `index 1111111..2222222 100644\n--- ${old}my file.txt\t\n+++ ${next}my file.txt\t\n`
+                + '@@ -1 +1 @@\n-old\n+new\n');
+            assert.equal(file.status, 'M', `${old} and ${next}`);
+            assert.equal(file.oldPath, 'my file.txt', `${old} and ${next}`);
+            assert.equal(file.newPath, 'my file.txt', `${old} and ${next}`);
+        }
+    });
+
+    test('reads a mnemonic header alone when a change has no --- and +++ lines', () => {
+        const file = onlyFile('diff --git i/run me.sh w/run me.sh\nold mode 100644\nnew mode 100755\n');
+        assert.equal(file.oldPath, 'run me.sh');
+        assert.equal(file.newPath, 'run me.sh');
+    });
+
+    test('strips mnemonic prefixes beside /dev/null in additions and deletions', () => {
+        const added = onlyFile('diff --git c/added.txt i/added.txt\nnew file mode 100644\n'
+            + 'index 0000000..1111111\n--- /dev/null\n+++ i/added.txt\n@@ -0,0 +1 @@\n+new\n');
+        assert.equal(added.status, 'A');
+        assert.equal(added.oldPath, 'added.txt');
+        assert.equal(added.newPath, 'added.txt');
+        const deleted = onlyFile('diff --git i/gone.txt w/gone.txt\ndeleted file mode 100644\n'
+            + 'index 1111111..0000000\n--- i/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n');
+        assert.equal(deleted.status, 'D');
+        assert.equal(deleted.oldPath, 'gone.txt');
+        assert.equal(deleted.newPath, 'gone.txt');
+    });
+
+    test('strips --no-index 1/ and 2/ prefixes, in either order, from differently named files', () => {
+        for (const [old, next] of [['1/before.txt', '2/after.txt'], ['2/after.txt', '1/before.txt']]) {
+            const file = onlyFile(`diff --git ${old} ${next}\nindex 1111111..2222222 100644\n`
+                + `--- ${old}\n+++ ${next}\n@@ -1 +1 @@\n-old\n+new\n`);
+            assert.equal(file.oldPath, old.slice(2));
+            assert.equal(file.newPath, next.slice(2));
+        }
+    });
+
+    test('keeps a shared one-letter directory, as in --no-prefix output, instead of treating it as a pair', () => {
+        const file = onlyFile('diff --git w/file.txt w/file.txt\nindex 1111111..2222222 100644\n'
+            + '--- w/file.txt\n+++ w/file.txt\n@@ -1 +1 @@\n-old\n+new\n');
+        assert.equal(file.oldPath, 'w/file.txt');
+        assert.equal(file.newPath, 'w/file.txt');
+    });
 });
 
 describe('parseHunks validation', () => {

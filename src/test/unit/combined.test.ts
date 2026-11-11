@@ -279,6 +279,15 @@ describe('parseCombinedParts per-parent views', () => {
         assert.deepEqual(file.perParent.map(parent => parent.status), ['R', 'R']);
     });
 
+    test('strips the i/ and w/ prefixes of a conflict diff written with diff.mnemonicPrefix', () => {
+        // Transcribed from `git diff` during a conflicted merge with diff.mnemonicPrefix set (Git 2.34.1).
+        const text = 'diff --cc f.txt\nindex 61ca839,68ddb7a..0000000\n--- i/f.txt\n+++ w/f.txt\n'
+            + '@@@ -1,3 -1,3 +1,3 @@@\n  alpha\n- ours\n -theirs\n++merged\n  omega\n';
+        const file = onlyCombined(text);
+        assert.deepEqual(file.perParent.map(parent => parent.oldPath), ['f.txt', 'f.txt']);
+        assert.deepEqual(file.perParent.map(parent => parent.status), ['M', 'M']);
+    });
+
     test('treats a per-parent /dev/null old path as an addition versus that parent only', () => {
         const text = 'diff --combined part.txt\nindex 0000000,1234567..89abcde\n'
             + '--- /dev/null\n--- a/part.txt\n+++ b/part.txt\n'
