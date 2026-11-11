@@ -2,7 +2,8 @@ name: Publish
 
 # A version tag (v1.2.3) publishes a release. Running the workflow by hand from main publishes the current version,
 # as a pre-release unless that box is cleared. The verify job packages the extension once, with that choice applied,
-# and the publish job publishes that exact file. The Marketplace's Trusted Publishing policy must name this file.
+# and each registry's job publishes that exact file. The Marketplace's Trusted Publishing policy must name this file.
+# The Open VSX job runs only when the repository variable OPEN_VSX_PUBLISHING is `trusted` or `token`.
 on:
   push:
     tags: ['v*.*.*']
@@ -34,7 +35,6 @@ jobs:
       contents: write # create the GitHub release
       id-token: write # sign in to the Marketplace with Trusted Publishing
     env:
-      OVSX_PAT: ${{ secrets.OVSX_PAT }}
       PRE_RELEASE_FLAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.pre_release) && '--pre-release' || '' }}
     steps:
       - uses: actions/checkout@v7
@@ -73,9 +73,6 @@ jobs:
           echo "Publishing view-patch.vsix (${packaged}), SHA-256 ${digest}" | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: Publish to the Visual Studio Marketplace
         run: npx vsce publish --oidc ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --packagePath view-patch.vsix
-      - name: Publish to Open VSX
-        if: env.OVSX_PAT != ''
-        run: npx --yes ovsx@1.4.0 publish view-patch.vsix ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --pat "${OVSX_PAT}"
       - name: Create the GitHub release
         if: github.event_name == 'push'
         env:
@@ -84,3 +81,34 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" view-patch.vsix
           --title "${GITHUB_REF_NAME}"
           --notes "See CHANGELOG.md for what changed."
+
+  # A separate job, so a failed Open VSX upload can be re-run without publishing to the Marketplace again. The
+  # package carries its pre-release mark, which Open VSX reads; ovsx ignores --pre-release for a built package.
+  open-vsx:
+    needs: verify
+    if: >-
+      (vars.OPEN_VSX_PUBLISHING == 'trusted' || vars.OPEN_VSX_PUBLISHING == 'token') &&
+      (github.event_name == 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # exchange for a short-lived Open VSX token when Trusted Publishing is used
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Download the package that CI verified
+        uses: actions/download-artifact@v8
+        with:
+          name: view-patch-vsix
+      - name: Record the package digest
+        run: |
+          digest="$(sha256sum view-patch.vsix | cut -d ' ' -f 1)"
+          echo "Publishing view-patch.vsix to Open VSX, SHA-256 ${digest}" | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Publish to Open VSX with Trusted Publishing
+        if: vars.OPEN_VSX_PUBLISHING == 'trusted'
+        run: npx --yes ovsx@1.4.0 publish view-patch.vsix --trusted-publishing
+      - name: Publish to Open VSX with an access token
+        if: vars.OPEN_VSX_PUBLISHING == 'token'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx@1.4.0 publish view-patch.vsix
