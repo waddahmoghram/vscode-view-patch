@@ -5,11 +5,11 @@ general procedure and one-time setup; [TEST_PLAN.md](TEST_PLAN.md) names the aut
 the manual checks a regular release needs, the tag-driven publish, and the exit verification, with the decision
 rules for each step.
 
-> **Status:** IN PROGRESS for regular 0.3.5. Attempt 1 checked pre-release 0.3.3 and found two web defects
-> (section 12); their fix shipped as pre-release 0.3.4, published and verified on 2026-11-11. In attempt 2, both
-> checks passed on 0.3.4 the same day. The release commit, the tag, and the exit verification are next.
+> **Status:** COMPLETE for regular 0.3.5, published 2026-11-11 by pushing tag `v0.3.5`. Attempt 1 checked
+> pre-release 0.3.3 and found two web defects (section 12); their fix shipped as pre-release 0.3.4, on which both
+> checks passed the same day (attempt 2), and the exit verification of 0.3.5 passed.
 >
-> **Current verdict:** PENDING: the checks passed; the release is not yet published.
+> **Current verdict:** PASS.
 >
 > **Controlling corrections:** [2026-11-11 review correction](#2026-11-11---review-correction): the release
 > target moved from 0.3.4 to 0.3.5. [Check B step 5 correction](#2026-11-11---check-b-step-5-correction): a
@@ -62,7 +62,7 @@ The question each campaign answers: is the candidate commit safe to publish on t
 | Its source commit | `11d48386a020248272add0d61e001482775fd9fc` | The commit Publish run `43102614491` built; it differs from the Release 0.3.4 commit `a42956a` only in this file |
 | Its package SHA-256 | `a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b` | Packaging job `130801344413`, publish job `130802978286` (that run's attempt 2), and the Marketplace download all equal |
 | Remote-check patch | `git format-patch -1 ad2e6ec`, four files, parent `0aef85b` | `git show --stat ad2e6ec` |
-| Release commit and tag | pending | Section 8 |
+| Release commit and tag | `82110ca8dafaff981577d4c9890d9f9d1169aa01`, tag `v0.3.5` | The tag ref resolves to that commit, and GitHub `main` is at it (section 12) |
 
 ## 4. Stop rules
 
@@ -247,7 +247,7 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | Version | Channel | Published | Source commit | Check A | Check B | Package SHA-256 (CI = publish = Marketplace) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 0.3.0 | regular | 2026-11-10 | `1f89c6c` | not recorded | not recorded | not comparable: rebuilt at publish |
-| 0.3.5 | regular | pending | pending | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | pending |
+| 0.3.5 | regular | 2026-11-11 | `82110ca` | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | `661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`, also equal to the GitHub release asset |
 
 Pre-releases need no manual checks; [RELEASING.md](RELEASING.md#release-channels) lists them.
 
@@ -265,7 +265,8 @@ The same day, on a Linux clone and without VS Code, these commands were dry-run 
 
 As first written, the manual checks in VS Code, the tag path, and the GitHub release download had not run; they
 stay proposed until a campaign records them here. Attempt 1 below is the first manual run. The tag path and the
-GitHub release download still have not run.
+GitHub release download still have not run. (Later the same day, both ran for the first time, for 0.3.5; see the
+release and exit verification below.)
 
 The corrected section 8 gate was dry-run the same day with `tested=a42956a` while `HEAD` was that commit. Both
 commands printed nothing, which shows only that their syntax is valid, and `git branch -r --contains a42956a`
@@ -429,6 +430,30 @@ error. Section 7 now asks for one reloaded tab and for the output to be copied b
 Verdict for both checks: PASS on pre-release 0.3.4. Next come the release commit and tag (section 8) and the exit
 verification (section 9).
 
+### Release and exit verification: 0.3.5, 2026-11-11 (PASS)
+
+Before the push, the section 8 diff gate ran on the release commit `82110ca8dafaff981577d4c9890d9f9d1169aa01`
+with `tested=11d4838`. Its `--stat` listed only `package.json` and `package-lock.json`, and the `package.json`
+diff changed only the `version` line. A local regular package of that commit showed `Version="0.3.5"`, no
+pre-release property, the same 21 files, and the web fix.
+
+Times are Coordinated Universal Time.
+
+| Step | Result | Evidence |
+| --- | --- | --- |
+| Push `11d4838..82110ca` | GitHub `main` at `82110ca` | The repository interface |
+| CI and CodeQL on `82110ca` | Passed by 22:47:37, before the tag was pushed | Runs `43114003066` and `43114003001` |
+| Tag `v0.3.5` | Points at commit `82110ca8dafaff981577d4c9890d9f9d1169aa01` | The tag ref |
+| Publish run `43115767355`, started by the tag at 22:55:36 | Every job passed except Open VSX, which was skipped. The tag check passed, and neither log has an error marker | The job listing and logs |
+| Package and publish jobs | Both log `view-patch.vsix (regular), SHA-256 661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`. The publish job then logs `Published waddahmoghram.view-patch v0.3.5.` and creates the GitHub release | Jobs `130845280815` and `130845541026` |
+| GitHub release `v0.3.5` | Regular, not a draft, published 23:01:17. Its `view-patch.vsix` is 135,667 bytes, with digest `sha256:66115380…93a3c6` | The release interface |
+| Section 9 commands with `version=0.3.5`, at 23:19:05 | Both downloads gave `661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`, both manifests read `Version="0.3.5"`, and the pre-release property count printed `0` | Command output |
+| Listing | At 23:19:24, `0.3.5` was listed as a regular version, last updated 23:08:36.773, and was the newest regular version | A listing query |
+
+Verdict: PASS. Every section 9 check held: the packaging, publishing, Marketplace, and GitHub release digests are
+equal, and the Marketplace version carries no pre-release property. This was the first release published by pushing
+a tag, and the tag path ran as designed. Open VSX was not part of this release.
+
 ## 13. Update history
 
 ### 2026-11-11 - Initial record
@@ -479,3 +504,10 @@ verification (section 9).
 
 - Recorded checks A and B on 0.3.4 in section 12, attempt 2, including the unplaced report in check B step 4, and
   filled in section 11's check columns.
+
+### 2026-11-11 - 0.3.5 released
+
+- Recorded the release and its exit verification in section 12, filled in section 11's 0.3.5 row and section 3's
+  release row, and set the status to COMPLETE with the verdict PASS.
+- Added a dated note to section 12 that the tag path and the GitHub release download first ran for 0.3.5. The
+  earlier sentence saying they had not run is kept as written.
