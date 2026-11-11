@@ -8,7 +8,7 @@ body:
       label: View Patch version and install source
       description: Extensions view > View Patch. Say whether it is a pre-release and whether it came from the
         Marketplace or a .vsix file.
-      placeholder: 0.3.1 pre-release from the Marketplace
+      placeholder: 0.3.4 pre-release from the Marketplace
     validations:
       required: true
   - type: input
