@@ -659,6 +659,30 @@ function headerPath(text: string, check: Check): string {
     return validPath(text.split('\t', 1)[0]);
 }
 
+// Prefix pairs Git writes before diff --git, ---, and +++ paths, old side first: the default a/ and b/, and with
+// diff.mnemonicPrefix the (c)ommit, (i)ndex, (w)ork-tree, and (o)bject sides or --no-index's 1/ and 2/. A reversed
+// diff swaps a mnemonic pair. Each pair was observed in Git 2.34.1 output.
+const PREFIX_PAIRS: ReadonlySet<string> = new Set([
+    'a/b/', 'i/w/', 'w/i/', 'c/w/', 'w/c/', 'c/i/', 'i/c/', 'o/w/', '1/2/', '2/1/',
+]);
+
+/** The old and new prefixes when two paths carry a pair Git writes, such as a/ and b/ or i/ and w/. */
+function prefixPair(old: string, next: string): readonly [string, string] | undefined {
+    const pair = [old.slice(0, 2), next.slice(0, 2)] as const;
+    return PREFIX_PAIRS.has(pair[0] + pair[1]) ? pair : undefined;
+}
+
+/** Plain unified diffs keep the a/ and b/ convention only; Git's mnemonic pairs come with diff --git headers. */
+function plainPrefixes(old: string, next: string): readonly [string, string] | undefined {
+    const prefixed = old.startsWith('a/') && next.startsWith('b/')
+        || old === '/dev/null' && next.startsWith('b/') || next === '/dev/null' && old.startsWith('a/');
+    return prefixed ? ['a/', 'b/'] : undefined;
+}
+
+function unprefix(path: string, prefix: string): string {
+    return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
 function gitPaths(text: string, check: Check): readonly [string, string] {
     if (text.startsWith('"')) {
         const old = quotedPath(text, check);
@@ -675,7 +699,7 @@ function gitPaths(text: string, check: Check): readonly [string, string] {
     if (Number.isInteger(middle) && text[middle] === ' ') {
         const old = text.slice(0, middle);
         const next = text.slice(middle + 1);
-        if (old === next || old.startsWith('a/') && next === `b/${old.slice(2)}`) {
+        if (old === next || prefixPair(old, next) && old.slice(2) === next.slice(2)) {
             return [validPath(old), validPath(next)];
         }
     }
@@ -783,7 +807,7 @@ class FileBuilder {
     private newEnd = 0;
     private oldEof = false;
     private newEof = false;
-    private readonly prefixed: boolean;
+    private readonly prefixes?: readonly [string, string];
 
     constructor(
         public oldPath: string,
@@ -791,13 +815,11 @@ class FileBuilder {
         private readonly git: boolean,
         private readonly budget: ContentBudget,
     ) {
-        this.prefixed = git && oldPath.startsWith('a/') && newPath.startsWith('b/');
-        this.oldPath = this.strip(oldPath, 'a/');
-        this.newPath = this.strip(newPath, 'b/');
-    }
-
-    private strip(path: string, prefix: string): string {
-        return this.prefixed && path.startsWith(prefix) ? path.slice(2) : path;
+        this.prefixes = git ? prefixPair(oldPath, newPath) : undefined;
+        if (this.prefixes) {
+            this.oldPath = oldPath.slice(2);
+            this.newPath = newPath.slice(2);
+        }
     }
 
     paths(old: string, next: string, line: TextLine): void {
@@ -806,13 +828,12 @@ class FileBuilder {
         }
         this.added ||= old === '/dev/null';
         this.deleted ||= next === '/dev/null';
-        const prefixed = this.git ? this.prefixed : old.startsWith('a/') && next.startsWith('b/')
-            || old === '/dev/null' && next.startsWith('b/') || next === '/dev/null' && old.startsWith('a/');
+        const prefixes = this.git ? this.prefixes : plainPrefixes(old, next);
         this.oldPath = old === '/dev/null' ? next : old;
         this.newPath = next === '/dev/null' ? old : next;
-        if (prefixed) {
-            this.oldPath = this.oldPath.replace(old === '/dev/null' ? /^b\// : /^a\//, '');
-            this.newPath = this.newPath.replace(next === '/dev/null' ? /^a\// : /^b\//, '');
+        if (prefixes) {
+            this.oldPath = unprefix(this.oldPath, prefixes[old === '/dev/null' ? 1 : 0]);
+            this.newPath = unprefix(this.newPath, prefixes[next === '/dev/null' ? 0 : 1]);
         }
         this.textHeaders = true;
     }
@@ -1251,8 +1272,8 @@ class CombinedBuilder {
         } else if (olds.every(path => path === '/dev/null')) {
             this.added = true;
         }
-        this.oldPaths = olds.map(path =>
-            path !== '/dev/null' && path.startsWith('a/') ? path.slice(2) : path);
+        this.oldPaths = olds.map(path => path === '/dev/null' ? path
+            : path.startsWith('a/') || next !== '/dev/null' && prefixPair(path, next) ? path.slice(2) : path);
         this.textHeaders = true;
     }
 
