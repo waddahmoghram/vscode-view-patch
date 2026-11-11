@@ -15,4 +15,5 @@ tsconfig.json
 images/make_icon.py
 images/screenshot.png
 RELEASING.md
+TEST_PLAN.md
 *.vsix
