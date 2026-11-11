@@ -37,7 +37,16 @@ that VS Code-compatible editors such as VSCodium use.
       npx ovsx create-namespace waddahmoghram -p <token>
       ```
 
-   1. Save the token as the repository secret `OVSX_PAT`. The Publish workflow skips Open VSX when it is not set.
+      Creating a namespace makes you a contributor, not its owner, so Open VSX shows published versions as
+      unverified. To have them shown as verified, claim ownership by opening an issue at
+      [EclipseFdn/open-vsx.org](https://github.com/EclipseFdn/open-vsx.org/issues/new/choose).
+   1. Choose how the Publish workflow signs in, and set the repository variable `OPEN_VSX_PUBLISHING` to match. The
+      Open VSX job is skipped while the variable is unset.
+      - `trusted`, preferred because no token is stored: once you own the namespace, register this repository's
+        `publish.yml` workflow on the open-vsx.org **Trusted Publishers** settings page. The job then exchanges its
+        GitHub identity for a short-lived token. Delete the access token if nothing else uses it.
+      - `token`: save the access token as the repository secret `OVSX_PAT`. Only the step that publishes to Open VSX
+        receives it, not dependency installation or any other step.
 
 ## Release channels
 
@@ -72,6 +81,10 @@ pre-release users to move to it too.
    It then checks the tag against `package.json`, downloads that exact `.vsix`, checks its channel, and records its
    SHA-256 digest; the packaging job records the digest too, so the two can be compared. It publishes that file and
    attaches the same file to a GitHub release. Concurrent publishing runs are serialized.
+1. When Open VSX publishing is enabled, a separate job publishes the same file there and records its digest. If only
+   that job fails, re-run it alone; re-running the whole workflow would try to publish the Marketplace version
+   again, which the Marketplace refuses. To add a version that is already on the Marketplace, publish its `.vsix`
+   by hand with `npx ovsx publish view-patch.vsix -p <token>`.
 
 ## Pre-releases
 
