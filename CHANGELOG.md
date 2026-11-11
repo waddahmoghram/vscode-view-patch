@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+- In VS Code for the Web, opening a patch now goes straight to a hunk-only review and says once why, instead of
+  showing an error about a missing repository with choices that cannot work in a browser. **Review a Commit**
+  declines there with the same reason.
+- **Copy Diagnostics** in VS Code for the Web now says Git cannot run there, instead of a misleading message about
+  home-folder repository settings.
+
 ## 0.3.3
 
 - Hunk-only views now read the path prefixes Git writes with its `diff.mnemonicPrefix` setting (`i/`, `w/`,
