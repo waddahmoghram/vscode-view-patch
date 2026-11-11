@@ -141,7 +141,8 @@ Not automated:
   whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
 
-[RELEASING.md](RELEASING.md#checking-a-package-locally) asks for the first two before each regular release.
+[RELEASING.md](RELEASING.md#checking-a-package-locally) asks for the first two before each regular release; the
+[regular release runbook](RELEASE_RUNBOOK.md) gives their steps, decision rules, and results.
 
 Known defects:
 
