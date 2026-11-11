@@ -156,7 +156,7 @@ a leading `~` in an extra repository path means your home folder.
 - Workspace trust for Git-backed reviews. Hunk-only views work in Restricted Mode.
 - In a remote window, the extension and Git-backed operations run next to the remote repositories.
 - In VS Code for the Web and virtual workspaces, hunk-only reviews work; Git-backed reviews need a desktop
-  window with a local repository. Web support is new in this release and still being exercised.
+  window with a local repository. Web support is new and still being exercised.
 - Git and standard unified diffs are supported, including combined merge diffs as described above.
   Malformed or truncated hunks are rejected explicitly. `quoted-printable` and `base64` mail bodies are
   decoded; other encodings and multipart mail are rejected with the reason named.

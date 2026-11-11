@@ -2,7 +2,7 @@
   "name": "view-patch",
   "displayName": "View Patch",
   "description": "Review patches and patch series side by side, with complete Git-backed files or explicit repository-free hunk views.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "waddahmoghram",
   "author": "Waddah Moghram",
   "license": "MIT",
