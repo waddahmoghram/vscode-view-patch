@@ -116,3 +116,40 @@ including the oldest supported editor.
 Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
 tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. Provider-backed address
 tests cover path handling but are not an end-to-end remote connection or web-session test.
+
+## Quality dashboard
+
+The Quality dashboard workflow ([`dashboard.yml`](.github/workflows/dashboard.yml)) runs
+[`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs) daily, when started by hand, and after each
+continuous integration (CI) or Publish run on `main` or a release tag finishes. Its page shows:
+
+- A release-readiness verdict with each rule's result and evidence: the latest CI run on `main` succeeded, the
+  latest CodeQL run there did not fail, the latest successful Publish run recorded matching package digests or none
+  to compare, and no Dependabot pull request has been open longer than 14 days. A failed rule means not ready; a
+  rule that cannot be evaluated, such as the digest rule without job logs, leaves the verdict undetermined.
+- CI, CodeQL, and Publish history: pass rates, re-runs as a sign of flaky tests, durations, the latest CI run's
+  jobs, and the test counts that its logs report.
+- The digests that Publish run recorded, next to the Marketplace's own digest of the version it published; the
+  Marketplace's latest version, channel, and install, download, and update counts; the Open VSX listing; and open
+  Dependabot pull requests.
+
+Every run adds a summary to its own run page and keeps the site for a day as its `github-pages` artifact. To
+publish the site with GitHub Pages:
+
+1. In the repository's **Settings** > **Pages**, set **Source** to **GitHub Actions**.
+1. In **Settings** > **Secrets and variables** > **Actions** > **Variables**, add the repository variable
+   `DASHBOARD_PAGES` with the value `true`.
+
+The deploy job is skipped until then. Once it runs, the site's address appears on that job and under
+**Settings** > **Pages**.
+
+To build the dashboard locally, from the repository root:
+
+```bash
+node scripts/quality-dashboard.mjs
+```
+
+Open `.dashboard/index.html`; `.dashboard/data.json` holds the same data. Without `GITHUB_TOKEN`, the script makes
+six GitHub requests, well under the limit of 60 an hour for unauthenticated use, and shows the values that only
+job logs hold, the test counts and digests, as unavailable. Set `GITHUB_TOKEN` to a token that can read this
+repository's Actions to include them, and `DASHBOARD_OUT` to write somewhere else.
