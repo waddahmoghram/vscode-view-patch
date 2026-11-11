@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - Releases now publish the exact package that continuous integration built and checked, instead of
   rebuilding it at publish time. The publish job confirms the package's pre-release or regular channel
   before uploading, and both jobs record its SHA-256 digest so the two can be compared.
 - Optional Open VSX publishing runs in its own job, which can be re-run alone. It can sign in with Trusted
   Publishing instead of a stored token; a stored token now reaches only the step that publishes.
+- Copy Diagnostics works in VS Code for the Web. It failed there because it read Node.js process details that
+  the browser does not have; it now reports the platform as a browser.
+- The lockfile's own version now matches the package again; it had been left at 0.3.0.
 
 ## 0.3.1
 
