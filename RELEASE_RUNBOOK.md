@@ -6,13 +6,14 @@ the manual checks a regular release needs, the tag-driven publish, and the exit 
 rules for each step.
 
 > **Status:** IN PROGRESS for regular 0.3.5. Attempt 1 checked pre-release 0.3.3 and found two web defects
-> (section 12); their fix shipped as pre-release 0.3.4, published and verified on 2026-11-11. Attempt 2 repeats
-> both checks on it; they are pending.
+> (section 12); their fix shipped as pre-release 0.3.4, published and verified on 2026-11-11. In attempt 2, both
+> checks passed on 0.3.4 the same day. The release commit, the tag, and the exit verification are next.
 >
-> **Current verdict:** PENDING.
+> **Current verdict:** PENDING: the checks passed; the release is not yet published.
 >
-> **Controlling correction:** [2026-11-11 review correction](#2026-11-11---review-correction): the release
-> target moved from 0.3.4 to 0.3.5.
+> **Controlling corrections:** [2026-11-11 review correction](#2026-11-11---review-correction): the release
+> target moved from 0.3.4 to 0.3.5. [Check B step 5 correction](#2026-11-11---check-b-step-5-correction): a
+> file-backed patch now tests saving on the web.
 
 ## 1. Purpose
 
@@ -147,7 +148,8 @@ must leave the repository unchanged.
 ## 7. Manual check B: public vscode.dev
 
 1. Open <https://vscode.dev>, install **View Patch** from the Extensions view, then choose **Switch to
-   Pre-Release Version**. Expected: no message that it is unavailable in VS Code for the Web.
+   Pre-Release Version**. Expected: no message that it is unavailable in VS Code for the Web. Use one vscode.dev
+   tab, reloaded after any update: a tab keeps running the version it loaded.
 2. Run the identity gate (section 5).
 3. Run **View Patch: Open Sample Patch**. Expected: a hunk-only review of the built-in sample.
 4. Copy this diff, then run **View Patch: Open Patch from Clipboard** and allow clipboard access if asked:
@@ -165,8 +167,19 @@ must leave the repository unchanged.
    Expected (0.3.4 and later): no error prompt; a hunk-only review opens directly, and the first such review in
    the session shows a notice that VS Code for the Web cannot run Git. The review lists `hello.txt`, not
    `i/hello.txt`. Before 0.3.4 an error-styled prompt appeared instead (section 12, attempt 1).
-5. Mark `hello.txt` reviewed, reload the page, and run **View Patch: Reopen Recent Patch...**. Expected: the
-   review reopens with the checkmark kept.
+5. Mark `hello.txt` reviewed. Expected: it shows as reviewed. View Patch does not save clipboard or sample
+   patches for **Reopen Recent Patch...**, because they open as unsaved documents; steps 6 and 7 test saving with a
+   file.
+6. Open <https://vscode.dev/github/microsoft/vcpkg/blob/master/ports/zlib/0001-no-version-script-on-ohos.patch>,
+   a real patch written with `i/` and `w/`, signing in to GitHub if asked. With its tab active, run **View Patch:
+   Open Patch as Changes**. Expected: no "No Git repository was found" warning, and a hunk-only review listing
+   `CMakeLists.txt`, not `i/CMakeLists.txt`.
+7. Mark `CMakeLists.txt` reviewed, reload the page, run **View Patch: Reopen Recent Patch...**, and choose that
+   patch. Expected: the review reopens with `CMakeLists.txt` still marked reviewed.
+8. On the reloaded page, repeat step 4. Expected: as in step 4.
+
+If a result differs, copy the **View Patch** output (Ctrl+Shift+U, then choose **View Patch**) before reloading
+or leaving the page: a reload clears it, and it records which code path ran.
 
 ## 8. Cut the release
 
@@ -234,7 +247,7 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | Version | Channel | Published | Source commit | Check A | Check B | Package SHA-256 (CI = publish = Marketplace) |
 | --- | --- | --- | --- | --- | --- | --- |
 | 0.3.0 | regular | 2026-11-10 | `1f89c6c` | not recorded | not recorded | not comparable: rebuilt at publish |
-| 0.3.5 | regular | pending | pending | pending | pending | pending |
+| 0.3.5 | regular | pending | pending | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | pending |
 
 Pre-releases need no manual checks; [RELEASING.md](RELEASING.md#release-channels) lists them.
 
@@ -362,7 +375,59 @@ git merge-base --is-ancestor 11d4838 FETCH_HEAD && echo "11d4838 is on GitHub ma
 
 Both lines printed, and `FETCH_HEAD` was `11d48386a020248272add0d61e001482775fd9fc`.
 
-Checks A and B on 0.3.4: pending.
+Checks A and B ran on 0.3.4 the same afternoon. Times are the checker's local time, eight hours behind Coordinated
+Universal Time.
+
+**Check A: PASS.** It ran in a new remote window on a fresh clone (section 6), on Visual Studio Code 1.145.2.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| Identity gate | PASS | `View Patch 0.3.4`, `Remote: ssh-remote`, `Platform: linux x64; Node 24.22.1`, `Git version: git version 2.34.1`, one trusted workspace folder |
+| Preflight | PASS | Clone at `11d4838`: `check commit present`, no `git status` output, `count: 0`, `in-pack: 314` |
+| 2. Open Patch as Changes | PASS | The four files. Log: `remote-check.patch: complete review r1; base ad2e6ec6e549fae93d5855921b761ae19538f95c^.` |
+| 3. Mark and refresh | PASS | The mark stayed; the log shows the refreshed review as `r2` |
+| 4. Hunks only | PASS | The same four files, labeled partial context. Log: `remote-check.patch: partial review r2; base (hunks only).` |
+| 5. Close | PASS | Both reviews left **Patch Reviews**; no other tab closed |
+| After | PASS | No `git status` output; `count: 0`, `in-pack: 314` |
+
+Only three things under `.git` changed after the patch was written at 13:52:02. The `index` was refreshed at
+13:52:02, and GitLens wrote its per-branch timestamps to `gk/config` at 13:52:03. Both came before View Patch
+started at 13:54:58. The `.git` folder's own modification time changed at 14:06:12, from the closing `git status`.
+No object, ref, or configuration file changed.
+
+**Check B: PASS.** It ran on vscode.dev, Visual Studio Code 1.146.0. Steps 5 to 8 follow the
+[Check B step 5 correction](#2026-11-11---check-b-step-5-correction), which was made before the checker reached
+step 5.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| 2. Identity gate | PASS | `View Patch 0.3.4`, `Remote: (none)`, `Platform: browser (no Node.js)`, `Git executable: (none)`, `Git version: unavailable: VS Code for the Web cannot run Git.` |
+| 3. Sample patch | PASS | A hunk-only review |
+| 4. Clipboard patch | PASS, with one unplaced report | Two opens on 0.3.4, logged below, with no warning |
+| 5. Mark | PASS | `hello.txt` shown as reviewed |
+| 6. GitHub patch | PASS | `CMakeLists.txt`, not `i/CMakeLists.txt`; no warning |
+| 7. Reload and reopen | PASS | `CMakeLists.txt` still marked reviewed |
+| 8. Clipboard on the reloaded page | PASS | No warning |
+
+The **View Patch** output from step 4's page:
+
+```text
+2026-11-11 14:17:40.179 [info] Untitled-1: VS Code for the Web cannot run Git. Showing the patch's hunks only.
+2026-11-11 14:17:40.314 [info] Untitled-1: partial review r1; base (hunks only).
+2026-11-11 14:19:00.185 [info] Untitled-1: partial review r2; base (hunks only).
+2026-11-11 14:19:18.342 [info] Untitled-1: VS Code for the Web cannot run Git. Showing the patch's hunks only.
+2026-11-11 14:19:18.405 [info] Untitled-1: partial review r3; base (hunks only).
+```
+
+The unplaced report: the checker saw "No Git repository was found" on the first clipboard open. That page's output
+was not captured, and the checker could not say whether the page had reloaded after the update. In 0.3.4 the
+warning comes only from the complete-file path, which runs only when the host can run Git, and this build's
+diagnostics showed that it cannot. With no runtime identity, the report is not evidence either way. Two
+explanations fit: a tab still running 0.3.3, or the one-time notice, shown only on the first open, read as the old
+error. Section 7 now asks for one reloaded tab and for the output to be copied before reloading.
+
+Verdict for both checks: PASS on pre-release 0.3.4. Next come the release commit and tag (section 8) and the exit
+verification (section 9).
 
 ## 13. Update history
 
@@ -398,3 +463,19 @@ Checks A and B on 0.3.4: pending.
 - Added: section 6's preconditions for an unshared clone and a new window, with the clone commands; a section 10
   row for a GitHub incident; and a note in attempt 1 on why check A on 0.3.3 has no result.
 - Spelled out CI and SHA-256 at first use.
+
+### 2026-11-11 - Check B step 5 correction
+
+- Withdrawn: section 7 step 5, which read "Mark `hello.txt` reviewed, reload the page, and run **View Patch:
+  Reopen Recent Patch...**. Expected: the review reopens with the checkmark kept." View Patch never saves a review
+  whose source is an unsaved document (`rememberReview` in [`src/controller.ts`](src/controller.ts) skips
+  `untitled` sources), and clipboard and sample patches open that way. The step would have failed against
+  intended behavior. The correction was made before attempt 2 reached step 5, so no run used the old expectation.
+- Added: steps 6 and 7, which test saving with a file-backed patch from GitHub; step 8, which repeats step 4 on a
+  reloaded page; one reloaded tab in step 1; and copying the **View Patch** output before reloading when a result
+  differs.
+
+### 2026-11-11 - Checks passed on 0.3.4
+
+- Recorded checks A and B on 0.3.4 in section 12, attempt 2, including the unplaced report in check B step 4, and
+  filled in section 11's check columns.
