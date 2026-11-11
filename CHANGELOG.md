@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Releases now publish the exact package that continuous integration built and checked, instead of
+  rebuilding it at publish time. The publish job confirms the package's pre-release or regular channel
+  before uploading, and both jobs record its SHA-256 digest so the two can be compared.
+
 ## 0.3.1
 
 - Review a Commit...: review any revision straight from history, no patch file needed - per-parent
