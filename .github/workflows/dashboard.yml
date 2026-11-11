@@ -1,0 +1,61 @@
+name: Quality dashboard
+
+# Builds the quality dashboard with scripts/quality-dashboard.mjs every day, when run by hand, and after a CI or
+# Publish run on main or a release tag finishes. Each run adds a summary to its own page and keeps the built site as
+# an artifact. The deploy job publishes it to GitHub Pages only when the repository variable DASHBOARD_PAGES is
+# `true`; enable Pages with GitHub Actions as its source first (see RELEASING.md).
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI, Publish]
+    types: [completed]
+    # A Publish run for a release tag reports the tag as its branch.
+    branches: [main, 'v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: view-patch-dashboard
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Never for pull requests: a CI run that a pull request started can still report main as its branch.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # workflow runs, jobs, and job logs
+      pull-requests: read # open Dependabot pull requests
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build the dashboard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/quality-dashboard.mjs
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: .dashboard
+
+  deploy:
+    needs: build
+    if: vars.DASHBOARD_PAGES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # publish the site
+      id-token: write # prove the deployment's origin to Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

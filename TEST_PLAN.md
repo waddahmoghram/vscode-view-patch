@@ -46,6 +46,7 @@ Each leg compiles both bundles, runs the unit tests, and runs the editor and Res
 | Publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml), described below. | Tag pushes and manual runs from `main`. |
 | Inventory drift | `node scripts/test-inventory.mjs --check`, described in [Test inventory](#test-inventory). | Linux stable leg. |
 | Static analysis | CodeQL `security-and-quality` queries for JavaScript and TypeScript ([`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)). Not a release gate. | Pushes and pull requests to `main`, and weekly. |
+| Quality dashboard | [`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs), run by [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml), reports release-readiness rules, workflow history, test counts from CI logs, digest agreement, and registry listings. A monitor, not a gate; see [Quality dashboard](RELEASING.md#quality-dashboard). | Daily, by hand, and after CI or Publish runs on `main` or a release tag. |
 
 The Publish workflow first calls CI as its `verify` job, so a release waits for every matrix leg, the web tests,
 the audit, and packaging. Its `publish` job then checks that a release tag matches the `package.json` version,
@@ -90,6 +91,7 @@ Each row names the files that guard a risk and representative tests from them, q
 | R12 | all desktop layers | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | The `vscode: 1.90.0` matrix leg repeats the unit, editor, and Restricted Mode suites on the oldest supported VS Code. |
 | R13 | packaging gate | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Steps **Audit dependency vulnerabilities**, **Package**, and **Record the package digest** in the `package` job. |
 | R13 | publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml) | Steps **Check that the tag matches package.json**, **Download the package that CI verified**, and **Check the package's channel and record its digest** in `publish`; **Record the package digest** in `open-vsx`. |
+| R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match" |
 
 <!-- traceability:end -->
 
@@ -109,7 +111,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                         | Test sources                        | Count |
 | ---------- | ---------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   340 |
+| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   356 |
 | editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
 | restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     5 |
@@ -134,7 +136,8 @@ Not automated:
   not a remote extension host.
 - A public vscode.dev session with the extension installed from the Marketplace, running a hunk-only review. The
   web tests load the development folder into a local VS Code for the Web server instead.
-- The Open VSX listing after an Open VSX publish: version, channel, and whether the namespace shows as verified.
+- The Open VSX listing after an Open VSX publish. The quality dashboard reports the listed version, channel, and
+  whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
 
 [RELEASING.md](RELEASING.md#checking-a-package-locally) asks for the first two before each regular release.
@@ -157,7 +160,8 @@ Known defects:
   [Each release](RELEASING.md#each-release) describes; for a regular release, the manual checks above are done.
 - Exit: the Publish run succeeded; the digests recorded by the packaging job and by each publishing job are equal;
   the Marketplace lists the new version on the intended channel; and when Open VSX publishing is enabled, its job
-  succeeded too.
+  succeeded too. The quality dashboard re-checks the digests after each Publish run, adding the Marketplace's own
+  digest of the version that run published.
 
 ## Running each layer
 
