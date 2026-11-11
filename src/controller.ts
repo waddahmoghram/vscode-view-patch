@@ -95,6 +95,12 @@ const CHOOSE = 'Choose Repository and Base...';
 const HUNKS_ONLY = 'View Hunks Only';
 const OUTPUT = 'Show Output';
 const MIB = 1024 * 1024;
+const WEB_NO_GIT = 'VS Code for the Web cannot run Git.';
+
+/** False in the web extension host (VS Code for the Web), which has no Node.js process and so cannot run Git. */
+function hostRunsGit(): boolean {
+    return typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+}
 
 export class ReviewController implements vscode.Disposable {
     readonly documents = new PatchDocuments();
@@ -111,6 +117,7 @@ export class ReviewController implements vscode.Disposable {
     private nextId = 1;
     private syncTimer?: ReturnType<typeof setTimeout>;
     private disposed = false;
+    private explainedWebHunks = false;
 
     constructor(private readonly log: vscode.LogOutputChannel, private readonly state: vscode.Memento) {
         this.view = vscode.window.createTreeView('viewPatch.reviews', {
@@ -396,6 +403,9 @@ export class ReviewController implements vscode.Disposable {
 
     /** Reviews any commit from history: no patch file, per-parent sections for merges. */
     async reviewCommit(repoArg?: unknown, revisionArg?: unknown): Promise<ShownPatch | undefined> {
+        if (!hostRunsGit()) {
+            throw new Error(`Reviewing a commit needs Git. ${WEB_NO_GIT} Open a patch file to see its hunks.`);
+        }
         const api = await this.gitApi();
         const git = new Git(gitExecutable(api));
         const probe = new AbortController();
@@ -577,29 +587,30 @@ export class ReviewController implements vscode.Disposable {
     async copyDiagnostics(): Promise<string> {
         const api = await this.gitApi();
         const executable = gitExecutable(api);
-        let gitVersion: string;
-        try {
-            const output = await new Git(executable).run(
-                ['--version'], { cwd: os.homedir(), timeoutMs: 10_000, maxOutputBytes: 4096 });
-            gitVersion = output.toString('utf8').trim();
-        } catch (error) {
-            gitVersion = `unavailable: ${firstLines(errorMessage(error))}`;
+        const runsGit = hostRunsGit();
+        let gitVersion = `unavailable: ${WEB_NO_GIT}`;
+        if (runsGit) {
+            try {
+                const output = await new Git(executable).run(
+                    ['--version'], { cwd: os.homedir(), timeoutMs: 10_000, maxOutputBytes: 4096 });
+                gitVersion = output.toString('utf8').trim();
+            } catch (error) {
+                gitVersion = `unavailable: ${firstLines(errorMessage(error))}`;
+            }
         }
         const manifest = vscode.extensions.getExtension('waddahmoghram.view-patch')?.packageJSON as
             { version?: string } | undefined;
         const configured = vscode.workspace.getConfiguration('viewPatch').get<unknown[]>('repositories', []);
-        // The web extension host has no Node process object, and reading one there throws.
-        const node = typeof process === 'undefined' ? undefined : process.versions?.node;
-        const platform = node === undefined
-            ? 'browser (no Node.js)'
-            : `${process.platform} ${process.arch}; Node ${node}`;
+        const platform = runsGit
+            ? `${process.platform} ${process.arch}; Node ${process.versions.node}`
+            : 'browser (no Node.js)';
         const text = [
             `View Patch ${manifest?.version ?? '(unknown version)'}`,
             `Editor: ${vscode.env.appName} ${vscode.version} (${vscode.env.appHost})`,
             `Remote: ${vscode.env.remoteName ?? '(none)'}`,
             `Platform: ${platform}`,
             `Workspace folders: ${vscode.workspace.workspaceFolders?.length ?? 0}; trusted: ${vscode.workspace.isTrusted}`,
-            `Git executable: ${executable}`,
+            `Git executable: ${runsGit ? executable : '(none)'}`,
             `Git version: ${gitVersion}`,
             `Git extension repositories: ${api ? api.repositories.length : '(unavailable)'}`,
             `viewPatch.repositories entries: ${Array.isArray(configured) ? configured.length : '(invalid)'}`,
@@ -795,13 +806,17 @@ export class ReviewController implements vscode.Disposable {
                         await this.display(previous, previous.section);
                         return this.describe(previous);
                     }
-                    if (mode !== 'partial' && !vscode.workspace.isTrusted) {
+                    const effective: OpenMode = mode !== 'partial' && !hostRunsGit() ? 'partial' : mode;
+                    if (effective !== mode) {
+                        this.explainWebHunks(name);
+                    }
+                    if (effective !== 'partial' && !vscode.workspace.isTrusted) {
                         this.offerTrust(source);
                         return undefined;
                     }
-                    const data = mode === 'partial'
+                    const data = effective === 'partial'
                         ? partialData(source, digest, options)
-                        : await this.completeData(source, digest, mode, options, force ? previous : undefined);
+                        : await this.completeData(source, digest, effective, options, force ? previous : undefined);
                     throwIfAborted(options.signal);
                     return data && await this.install(data, previous);
                 } finally {
@@ -1267,6 +1282,17 @@ export class ReviewController implements vscode.Disposable {
             }
         }
         return new Set(stored.reviewed.filter(key => valid.has(key)));
+    }
+
+    /** Says once per session why reviews in VS Code for the Web open hunk-only, instead of offering Git paths. */
+    private explainWebHunks(name: string): void {
+        this.log.info(`${name}: ${WEB_NO_GIT} Showing the patch's hunks only.`);
+        if (this.explainedWebHunks) {
+            return;
+        }
+        this.explainedWebHunks = true;
+        void vscode.window.showInformationMessage(`View Patch: ${WEB_NO_GIT} Reviews here show only the lines`
+            + ' in the patch (hunk-only, partial context). Open the patch in desktop VS Code for complete files.');
     }
 
     private offerTrust(source: PatchSource): void {

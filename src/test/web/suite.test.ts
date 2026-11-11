@@ -79,14 +79,23 @@ suite('View Patch in the web extension host', () => {
         check(!after.includes('old line'), 'the after side must not keep the removed line');
     });
 
-    test('Git-backed auto mode returns no reviews without crashing, and hunks still work', async () => {
+    test('opening a patch on the web goes straight to hunks, because the web host cannot run Git', async () => {
         const document = await openDiffDocument('fallback');
-        const shown = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.open', document.uri);
-        check(Array.isArray(shown), 'viewPatch.open must still resolve to an array on the web');
-        check(shown.length === 0, 'auto mode has no Git on the web, so it must return no reviews');
-        const partial = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openHunks', document.uri);
-        check(partial.length === 1, 'openHunks must still work after the auto-mode fallback');
-        check(partial[0].mode === 'partial', 'the fallback review must be hunk-only');
+        for (const command of ['viewPatch.open', 'viewPatch.openWith']) {
+            const shown = await vscode.commands.executeCommand<ShownPatch[]>(command, document.uri);
+            check(Array.isArray(shown) && shown.length === 1, `${command} must open one review on the web`);
+            check(shown[0].mode === 'partial', `${command} must open a hunk-only review on the web`);
+        }
+    });
+
+    test('reviewing a commit on the web declines with the reason instead of attempting Git', async () => {
+        let message = '';
+        try {
+            await api.reviews.reviewCommit();
+        } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+        }
+        check(message.includes('VS Code for the Web cannot run Git.'), `the refusal must name the reason: ${message}`);
     });
 
     test('the sample command opens a partial review', async () => {
@@ -100,6 +109,8 @@ suite('View Patch in the web extension host', () => {
         const text = await vscode.commands.executeCommand<string>('viewPatch.copyDiagnostics');
         check(typeof text === 'string' && text.startsWith('View Patch '), 'diagnostics must start with the version');
         check(/^Platform: browser \(no Node\.js\)$/m.test(text), `the platform line must name the browser:\n${text}`);
-        check(/^Git version: unavailable: /m.test(text), `Git cannot run on the web, so it must be unavailable:\n${text}`);
+        check(/^Git executable: \(none\)$/m.test(text), `no Git executable applies on the web:\n${text}`);
+        check(/^Git version: unavailable: VS Code for the Web cannot run Git\.$/m.test(text),
+            `the Git line must give the real reason:\n${text}`);
     });
 });

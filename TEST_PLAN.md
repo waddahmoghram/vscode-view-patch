@@ -76,7 +76,7 @@ Each row names the files that guard a risk and representative tests from them, q
 | R4 | editor | [`src/test/integration/extension.test.ts`](src/test/integration/extension.test.ts), [`src/test/integration/documents.test.ts`](src/test/integration/documents.test.ts) | "reads provider-backed patch addresses without treating them as local file paths"; "keeps spaces, non-ASCII names, and reserved address characters in source paths"; "serves absolute paths from plain unified patches without an invalid double-slash address" |
 | R4 | unit | [`src/test/unit/patchText.test.ts`](src/test/unit/patchText.test.ts), [`src/test/unit/combined.test.ts`](src/test/unit/combined.test.ts) | "strips each prefix pair Git writes with diff.mnemonicPrefix, including names with spaces"; "reads a mnemonic header alone when a change has no --- and +++ lines"; "keeps a shared one-letter directory, as in --no-prefix output, instead of treating it as a pair"; "strips the i/ and w/ prefixes of a conflict diff written with diff.mnemonicPrefix" |
 | R5 | unit | [`src/test/unit/webBundle.test.ts`](src/test/unit/webBundle.test.ts) | "web bundle builds, contains no Node built-in requires, and loads without Buffer or process"; "sha256 shim matches node:crypto on all block boundaries and a large input" |
-| R5 | web | [`src/test/web/suite.test.ts`](src/test/web/suite.test.ts) | "openHunks on untitled diff text shows one partial review with readable sides"; "Git-backed auto mode returns no reviews without crashing, and hunks still work"; "diagnostics are produced without Node globals, for bug reports from the web" |
+| R5 | web | [`src/test/web/suite.test.ts`](src/test/web/suite.test.ts) | "openHunks on untitled diff text shows one partial review with readable sides"; "opening a patch on the web goes straight to hunks, because the web host cannot run Git"; "reviewing a commit on the web declines with the reason instead of attempting Git"; "diagnostics are produced without Node globals, for bug reports from the web" |
 | R6 | restricted | [`src/test/restricted/run.ts`](src/test/restricted/run.ts) | "real Restricted Mode blocks Git-backed viewing and permits explicit hunk-only reviews." |
 | R6 | editor | [`src/test/integration/noWorkspace.test.ts`](src/test/integration/noWorkspace.test.ts), [`src/test/integration/extension.test.ts`](src/test/integration/extension.test.ts) | "opens explicitly partial hunks with no repository anywhere"; "shows explicit partial context without needing the patch repository" |
 | R7 | unit | [`src/test/unit/patchText.test.ts`](src/test/unit/patchText.test.ts) | "rejects ${name} explicitly", 35 table-driven cases that include a context line that lost its leading space and hunk counts smaller than the body; "rejects empty or ordinary text instead of returning success-shaped empty parts"; "flags an unrecognized transfer encoding per message instead of guessing" |
@@ -115,7 +115,7 @@ disagree with the sources; update this plan in the same change as the tests.
 | unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   362 |
 | editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
 | restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
-| web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     5 |
+| web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     6 |
 
 <!-- test-inventory:end -->
 
@@ -151,6 +151,11 @@ Known defects:
   `o/`, and `--no-index`'s `1/` and `2/`) displayed as `i/file` → `w/file`, and a header-only change to a name
   with spaces split at the first space. The R4 unit tests above now cover each pair Git 2.34.1 was observed to
   write, merge-conflict diffs, and a shared one-letter directory that must keep its name.
+- Fixed in 0.3.4, found 2026-11-11 by the first manual vscode.dev check of 0.3.3: opening a patch in VS Code for
+  the Web showed an error blaming a missing repository and offered **Choose Repository and Base...**, though a
+  browser can never run Git, and **Copy Diagnostics** gave a misleading home-folder reason for the missing Git
+  version. Web reviews now open hunk-only with a one-time explanation, **Review a Commit** declines with the reason,
+  and the diagnostics name it. The three R5 web tests that cover this failed against 0.3.3.
 - Fixed in f60d720: **Copy Diagnostics** failed in VS Code for the Web because it read Node.js process details.
   The web test "diagnostics are produced without Node globals, for bug reports from the web" now covers it,
   alongside the desktop editor test "copies diagnostics that identify the install without running a review".
