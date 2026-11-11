@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+    inputs:
+      pre_release:
+        description: Package as a pre-release. The Publish workflow sets this and then publishes this exact package.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +67,8 @@ jobs:
   package:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      PRE_RELEASE_FLAG: ${{ inputs.pre_release && '--pre-release' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -71,7 +78,14 @@ jobs:
       - run: npm ci
       - name: Audit dependency vulnerabilities
         run: npm audit --include=dev
-      - run: npx vsce package --out view-patch.vsix
+      - name: Package
+        run: npx vsce package ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --out view-patch.vsix
+      - name: Record the package digest
+        run: |
+          channel=regular
+          if [ -n "${PRE_RELEASE_FLAG}" ]; then channel=pre-release; fi
+          digest="$(sha256sum view-patch.vsix | cut -d ' ' -f 1)"
+          echo "Packaged view-patch.vsix (${channel}), SHA-256 ${digest}" | tee -a "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@v7
         with:
           name: view-patch-vsix
