@@ -1,7 +1,8 @@
 name: Publish
 
 # A version tag (v1.2.3) publishes a release. Running the workflow by hand from main publishes the current version,
-# as a pre-release unless that box is cleared. The Marketplace's Trusted Publishing policy must name this file.
+# as a pre-release unless that box is cleared. The verify job packages the extension once, with that choice applied,
+# and the publish job publishes that exact file. The Marketplace's Trusted Publishing policy must name this file.
 on:
   push:
     tags: ['v*.*.*']
@@ -22,6 +23,8 @@ concurrency:
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
+    with:
+      pre_release: ${{ github.event_name == 'workflow_dispatch' && inputs.pre_release }}
 
   publish:
     needs: verify
@@ -48,8 +51,26 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}."
             exit 1
           fi
-      - name: Package
-        run: npx vsce package ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --out view-patch.vsix
+      - name: Download the package that CI verified
+        uses: actions/download-artifact@v8
+        with:
+          name: view-patch-vsix
+      - name: Check the package's channel and record its digest
+        run: |
+          manifest="$(unzip -p view-patch.vsix extension.vsixmanifest)"
+          if grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"' <<< "${manifest}"; then
+            packaged=pre-release
+          else
+            packaged=regular
+          fi
+          requested=regular
+          if [ -n "${PRE_RELEASE_FLAG}" ]; then requested=pre-release; fi
+          if [ "${packaged}" != "${requested}" ]; then
+            echo "::error::CI packaged a ${packaged} build, but this run publishes ${requested}."
+            exit 1
+          fi
+          digest="$(sha256sum view-patch.vsix | cut -d ' ' -f 1)"
+          echo "Publishing view-patch.vsix (${packaged}), SHA-256 ${digest}" | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: Publish to the Visual Studio Marketplace
         run: npx vsce publish --oidc ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --packagePath view-patch.vsix
       - name: Publish to Open VSX

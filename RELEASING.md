@@ -61,16 +61,18 @@ A `v` tag publishes a regular release, so do not push one during this phase. For
    git push origin main v1.0.0
    ```
 
-1. The Publish workflow first calls the shared verification workflow. Publishing waits for all Linux, macOS, Windows,
-   and oldest-supported-editor tests, dependency auditing, and packaging to pass. It then checks the tag against
-   `package.json`, publishes, and creates a GitHub release with the `.vsix` file attached. Concurrent publishing runs
-   are serialized.
+1. The Publish workflow first calls the shared verification workflow, which builds the `.vsix` once. Publishing waits
+   for all Linux, macOS, Windows, oldest-supported-editor, and web tests, dependency auditing, and packaging to pass.
+   It then checks the tag against `package.json`, downloads that exact `.vsix`, checks its channel, and records its
+   SHA-256 digest; the packaging job records the digest too, so the two can be compared. It publishes that file and
+   attaches the same file to a GitHub release. Concurrent publishing runs are serialized.
 
 ## Pre-releases
 
 Run the Publish workflow by hand from the **Actions** tab, from `main`, with **Publish as a pre-release** checked. A
-pre-release needs a version number of its own. Preview status is a publishing flag, not a `-beta` suffix on the
-version. VS Code moves users to the highest available version, so plan preview and regular versions together.
+pre-release needs a version number of its own. Preview status is a flag recorded in the package when the verification
+workflow builds it, not a `-beta` suffix on the version. VS Code moves users to the highest available version, so plan
+preview and regular versions together.
 
 ## Checking a package locally
 
