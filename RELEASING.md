@@ -54,8 +54,10 @@ that VS Code-compatible editors such as VSCodium use.
 ## Release channels
 
 The preview phase ended with the first regular release: 0.2.0 was published as a pre-release, 0.3.0 as a regular
-release, and 0.3.1, 0.3.2, and 0.3.3 as pre-releases. 0.3.2 was the first release published from the package
-continuous integration verified. Each version number can be published only once, on one channel.
+release, 0.3.1 through 0.3.4 as pre-releases, and 0.3.5 as a regular release. 0.3.2 was the first release published
+from the package continuous integration verified, and 0.3.5 the first published by pushing a version tag, after the
+[regular release runbook](RELEASE_RUNBOOK.md)'s manual checks. Each version number can be published only once, on one
+channel.
 
 To publish a pre-release:
 
