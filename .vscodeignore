@@ -16,5 +16,6 @@ tsconfig.json
 images/make_icon.py
 images/screenshot.png
 RELEASING.md
+RELEASE_RUNBOOK.md
 TEST_PLAN.md
 *.vsix

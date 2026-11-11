@@ -54,8 +54,8 @@ that VS Code-compatible editors such as VSCodium use.
 ## Release channels
 
 The preview phase ended with the first regular release: 0.2.0 was published as a pre-release, 0.3.0 as a regular
-release, and 0.3.1 and 0.3.2 as pre-releases. 0.3.2 was the first release published from the package continuous
-integration verified. Each version number can be published only once, on one channel.
+release, and 0.3.1, 0.3.2, and 0.3.3 as pre-releases. 0.3.2 was the first release published from the package
+continuous integration verified. Each version number can be published only once, on one channel.
 
 To publish a pre-release:
 
@@ -64,10 +64,11 @@ To publish a pre-release:
 1. Commit and push to `main`, without a tag.
 1. Run the Publish workflow by hand, as described under [Pre-releases](#pre-releases).
 
-For a regular release, follow [Each release](#each-release). Running the Publish workflow by hand with **Publish as a
-pre-release** cleared also publishes a regular release, but without a tag or a GitHub release. VS Code moves users to
-the highest available version, so give a regular release a version higher than the latest pre-release for
-pre-release users to move to it too.
+For a regular release, follow [Each release](#each-release) together with the
+[regular release runbook](RELEASE_RUNBOOK.md), which adds the manual checks, the decision rules, and the exit
+verification. Running the Publish workflow by hand with **Publish as a pre-release** cleared also publishes a
+regular release, but without a tag or a GitHub release. VS Code moves users to the highest available version, so
+give a regular release a version higher than the latest pre-release for pre-release users to move to it too.
 
 ## Each release
 
@@ -118,8 +119,9 @@ Before removing an override, confirm the normal dependency tree is no longer vul
 including the oldest supported editor.
 
 Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
-tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. Provider-backed address
-tests cover path handling but are not an end-to-end remote connection or web-session test.
+tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. The
+[regular release runbook](RELEASE_RUNBOOK.md) gives the exact steps, expected results, and record. Provider-backed
+address tests cover path handling but are not an end-to-end remote connection or web-session test.
 
 ## Quality dashboard
 
