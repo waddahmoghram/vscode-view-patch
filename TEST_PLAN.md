@@ -135,8 +135,9 @@ Not automated:
 - A real remote window, such as one over Secure Shell (SSH): a complete-file review, a hunk-only review, refresh,
   and closing the last tab. The provider-backed address test covers path handling with a stand-in file system,
   not a remote extension host.
-- A public vscode.dev session with the extension installed from the Marketplace, running a hunk-only review. The
-  web tests load the development folder into a local VS Code for the Web server instead.
+- A public vscode.dev session with the extension installed from the Marketplace: hunk-only reviews from the
+  clipboard and from a patch file in a GitHub repository, and a saved review reopened after a reload. The web tests
+  load the development folder into a local VS Code for the Web server instead.
 - The Open VSX listing after an Open VSX publish. The quality dashboard reports the listed version, channel, and
   whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
