@@ -40,18 +40,22 @@ that VS Code-compatible editors such as VSCodium use.
       Creating a namespace makes you a contributor, not its owner, so Open VSX shows published versions as
       unverified. To have them shown as verified, claim ownership by opening an issue at
       [EclipseFdn/open-vsx.org](https://github.com/EclipseFdn/open-vsx.org/issues/new/choose).
-   1. Choose how the Publish workflow signs in, and set the repository variable `OPEN_VSX_PUBLISHING` to match. The
-      Open VSX job is skipped while the variable is unset.
-      - `trusted`, preferred because no token is stored: once you own the namespace, register this repository's
-        `publish.yml` workflow on the open-vsx.org **Trusted Publishers** settings page. The job then exchanges its
-        GitHub identity for a short-lived token. Delete the access token if nothing else uses it.
-      - `token`: save the access token as the repository secret `OVSX_PAT`. Only the step that publishes to Open VSX
-        receives it, not dependency installation or any other step.
+   1. Publish the first Open VSX version with that token: a trusted publisher can be registered only for an
+      extension that already has an active version. Save the token as the repository secret `OVSX_PAT` and set
+      the repository variable `OPEN_VSX_PUBLISHING` to `token` before a release, or publish an existing release's
+      `.vsix` by hand with `npx ovsx publish view-patch.vsix -p <token>`. Only the step that publishes to Open VSX
+      receives the secret, not dependency installation or any other step. The Open VSX job is skipped while the
+      variable is unset.
+   1. Optional, to stop storing a token: once you own the namespace, register this repository's `publish.yml`
+      workflow for the `view-patch` extension on the open-vsx.org **Trusted Publishers** settings page, set
+      `OPEN_VSX_PUBLISHING` to `trusted`, and delete the `OVSX_PAT` secret and the access token. The job then
+      exchanges its GitHub identity for a short-lived token that can publish only this extension.
 
 ## Release channels
 
 The preview phase ended with the first regular release: 0.2.0 was published as a pre-release, 0.3.0 as a regular
-release, and 0.3.1 as a pre-release. Each version number can be published only once, on one channel.
+release, and 0.3.1 and 0.3.2 as pre-releases. 0.3.2 was the first release published from the package continuous
+integration verified. Each version number can be published only once, on one channel.
 
 To publish a pre-release:
 
