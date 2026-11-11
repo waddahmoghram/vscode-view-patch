@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+- The first regular release since 0.3.0. It carries the 0.3.1 to 0.3.4 pre-releases below; its code is unchanged
+  from 0.3.4. Before release it passed manual checks in a real remote window and on public vscode.dev, recorded in
+  the [release runbook](RELEASE_RUNBOOK.md).
+
 ## 0.3.4
 
 - In VS Code for the Web, opening a patch now goes straight to a hunk-only review and says once why, instead of
