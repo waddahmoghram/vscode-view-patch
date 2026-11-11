@@ -1,13 +1,14 @@
 name: Bug report
-description: Report a View Patch problem. The extension is a pre-release; precise reports drive the next pre-release.
+description: Report a View Patch problem. Precise reports drive the next release.
 labels: [bug]
 body:
   - type: input
     id: version
     attributes:
       label: View Patch version and install source
-      description: Extensions view > View Patch. Say whether it came from the Marketplace or a .vsix file.
-      placeholder: 0.2.1 pre-release from the Marketplace
+      description: Extensions view > View Patch. Say whether it is a pre-release and whether it came from the
+        Marketplace or a .vsix file.
+      placeholder: 0.3.1 pre-release from the Marketplace
     validations:
       required: true
   - type: input
