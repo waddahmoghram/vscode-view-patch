@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- Hunk-only views now read the path prefixes Git writes with its `diff.mnemonicPrefix` setting (`i/`, `w/`,
+  `c/`, `o/`, and `--no-index`'s `1/` and `2/`), so those patches show `file` instead of `i/file` → `w/file`,
+  and merge-conflict diffs no longer show each parent as a rename. A change with no hunks, such as a mode change,
+  to a name containing spaces no longer splits that name at its first space.
+
 ## 0.3.2
 
 - Releases now publish the exact package that continuous integration built and checked, instead of
