@@ -95,4 +95,11 @@ suite('View Patch in the web extension host', () => {
         check(shown[0].mode === 'partial', 'the sample opens hunk-only, so it must be partial');
         check(shown[0].resources.length > 0, 'the sample must show at least one changed file');
     });
+
+    test('diagnostics are produced without Node globals, for bug reports from the web', async () => {
+        const text = await vscode.commands.executeCommand<string>('viewPatch.copyDiagnostics');
+        check(typeof text === 'string' && text.startsWith('View Patch '), 'diagnostics must start with the version');
+        check(/^Platform: browser \(no Node\.js\)$/m.test(text), `the platform line must name the browser:\n${text}`);
+        check(/^Git version: unavailable: /m.test(text), `Git cannot run on the web, so it must be unavailable:\n${text}`);
+    });
 });

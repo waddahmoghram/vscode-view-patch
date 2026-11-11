@@ -574,7 +574,8 @@ export class ReviewController implements vscode.Disposable {
         }
     }
 
-    async copyDiagnostics(): Promise<string> {        const api = await this.gitApi();
+    async copyDiagnostics(): Promise<string> {
+        const api = await this.gitApi();
         const executable = gitExecutable(api);
         let gitVersion: string;
         try {
@@ -587,11 +588,16 @@ export class ReviewController implements vscode.Disposable {
         const manifest = vscode.extensions.getExtension('waddahmoghram.view-patch')?.packageJSON as
             { version?: string } | undefined;
         const configured = vscode.workspace.getConfiguration('viewPatch').get<unknown[]>('repositories', []);
+        // The web extension host has no Node process object, and reading one there throws.
+        const node = typeof process === 'undefined' ? undefined : process.versions?.node;
+        const platform = node === undefined
+            ? 'browser (no Node.js)'
+            : `${process.platform} ${process.arch}; Node ${node}`;
         const text = [
             `View Patch ${manifest?.version ?? '(unknown version)'}`,
             `Editor: ${vscode.env.appName} ${vscode.version} (${vscode.env.appHost})`,
             `Remote: ${vscode.env.remoteName ?? '(none)'}`,
-            `Platform: ${process.platform} ${process.arch}; Node ${process.versions.node}`,
+            `Platform: ${platform}`,
             `Workspace folders: ${vscode.workspace.workspaceFolders?.length ?? 0}; trusted: ${vscode.workspace.isTrusted}`,
             `Git executable: ${executable}`,
             `Git version: ${gitVersion}`,
