@@ -348,7 +348,7 @@ never reached a step that reports it.
 | Publish run | Attempt | Result | Observation |
 | --- | --- | --- | --- |
 | `43094937518` (#6) | 1 | Failed; nothing published | The four test jobs passed. **Web tests** and **package** waited for an `ubuntu-latest` runner from 20:21:25Z and never started. The run ended at 21:00:44Z with publishing skipped. GitHub's [incident](https://stspg.io/jdjlq5zjyl48) put Actions in a major outage at 20:48:25Z and mitigated it at 21:07:24Z. The Marketplace still had 0.3.3 as its newest version. |
-| `43102614491` (#7) | 1 | Cancelled | Every job was cancelled 35 seconds in (21:23:25Z to 21:24:00Z), before any test finished. |
+| `43102614491` (#7) | 1 | Cancelled | Every job was cancelled 35 seconds in (21:23:25Z to 21:24:00Z), before any test finished. The operator cancelled it by mistake, as he reported later that day; nothing had been published. |
 | `43102614491` (#7) | 2 | Passed | Every job passed, with Open VSX skipped as configured. Publishing finished at 21:34:15Z. |
 
 Log excerpts from attempt 2's package and publish jobs:
@@ -511,3 +511,8 @@ a tag, and the tag path ran as designed. Open VSX was not part of this release.
   release row, and set the status to COMPLETE with the verdict PASS.
 - Added a dated note to section 12 that the tag path and the GitHub release download first ran for 0.3.5. The
   earlier sentence saying they had not run is kept as written.
+
+### 2026-11-11 - Run 7's cancellation explained
+
+- Section 12, attempt 2: the operator reported cancelling run 7's first attempt by mistake. That attempt published
+  nothing, and attempt 2 reran all jobs with the same inputs.
