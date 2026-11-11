@@ -6,7 +6,8 @@ the manual checks a regular release needs, the tag-driven publish, and the exit 
 rules for each step.
 
 > **Status:** IN PROGRESS for regular 0.3.5. Attempt 1 checked pre-release 0.3.3 and found two web defects
-> (section 12); their fix ships as pre-release 0.3.4, and both checks repeat on it.
+> (section 12); their fix shipped as pre-release 0.3.4, published and verified on 2026-11-11. Attempt 2 repeats
+> both checks on it; they are pending.
 >
 > **Current verdict:** PENDING.
 >
@@ -25,14 +26,15 @@ The question each campaign answers: is the candidate commit safe to publish on t
 
 - The candidate's code was already published as a pre-release, its Publish run passed, and its packaging,
   publishing, and Marketplace digests matched.
-- CI and CodeQL are green on `main` at the commit that pre-release came from.
+- Continuous integration (CI) and CodeQL are green on `main` at the commit that pre-release came from.
 - The release commit will change only the version, `CHANGELOG.md`, and documentation relative to that commit.
 
 ### PASS
 
 - Both manual checks in sections 6 and 7 meet every expected result, with the runtime identity gate passing.
-- After tagging, the exit checks in section 9 pass: the CI, publishing, Marketplace, and GitHub release digests are
-  equal, and the Marketplace lists the version without the pre-release property.
+- After tagging, the exit checks in section 9 pass: the Secure Hash Algorithm (SHA-256) digests from CI,
+  publishing, the Marketplace, and the GitHub release are equal, and the Marketplace lists the version without the
+  pre-release property.
 
 ### FAIL
 
@@ -55,9 +57,9 @@ The question each campaign answers: is the candidate commit safe to publish on t
 | Item | Value | Evidence |
 | --- | --- | --- |
 | Release version | `0.3.5` | Higher than the latest pre-release, as [RELEASING.md](RELEASING.md#release-channels) requires |
-| Pre-release under test | `0.3.4` | Pending publication; record its Marketplace validation time here |
-| Its source commit | `a42956a38c8c220bffeaa411c3de7dff2aeb9a3a` (Release 0.3.4) | Local when written; after the push, `git branch -r --contains a42956a` must list `origin/main` |
-| Its package SHA-256 | pending | Record the matching packaging, publishing, and Marketplace digests from its Publish run |
+| Pre-release under test | `0.3.4` | Marketplace download, validated 2026-11-11T21:35:45Z |
+| Its source commit | `11d48386a020248272add0d61e001482775fd9fc` | The commit Publish run `43102614491` built; it differs from the Release 0.3.4 commit `a42956a` only in this file |
+| Its package SHA-256 | `a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b` | Packaging job `130801344413`, publish job `130802978286` (that run's attempt 2), and the Marketplace download all equal |
 | Remote-check patch | `git format-patch -1 ad2e6ec`, four files, parent `0aef85b` | `git show --stat ad2e6ec` |
 | Release commit and tag | pending | Section 8 |
 
@@ -91,7 +93,22 @@ means the new one has not reached this editor yet: update the extension, reload,
 ## 6. Manual check A: a real remote window
 
 Preconditions: a VS Code window connected through Remote - SSH to a host with Git on `PATH` and a clone of this
-repository that contains `ad2e6ec`; View Patch installed on the remote side; the folder trusted.
+repository that contains `ad2e6ec`; View Patch installed on the remote side; the folder trusted. Two more come from
+attempt 1 (section 12):
+
+- Use a clone that nothing else writes to during the check, such as a fresh one. The object counts below cannot
+  tell View Patch's writes from anyone else's.
+- Open the clone in a new window after installing the version under test. A window that is already open keeps
+  running the version it loaded until **Restart Extensions**.
+
+```bash
+# On the remote host: a fresh clone, opened in its own window
+CLONE="$HOME/vp-check-a"
+git clone https://github.com/waddahmoghram/vscode-view-patch.git "$CLONE"
+code "$CLONE"
+```
+
+Run the rest of this section in that new window, with `CLONE` set again in its terminal.
 
 ```bash
 # On the remote host, in the clone
@@ -158,7 +175,7 @@ The release commit sets `version` in `package.json` and `package-lock.json` to t
 relative to the tested pre-release's source commit from section 3:
 
 ```bash
-tested=a42956a
+tested=11d4838
 git diff --stat "$tested" HEAD -- . ':(exclude)*.md' ':(exclude).github' ':(exclude).vscodeignore'
 git diff "$tested" HEAD -- package.json
 ```
@@ -210,6 +227,7 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | The tag check fails | The tag and `package.json` disagree | Nothing was published; correct the version or tag |
 | "already exists" when publishing | The version was used before | Choose the next patch version |
 | The GitHub release step fails after publishing | The Marketplace has the version, GitHub does not | Attach the verified CI artifact to a release by hand, then check its digest |
+| Publish jobs stay **Queued**, then the run fails with publishing skipped | A GitHub Actions incident; nothing was published | Confirm the Marketplace lacks the version and <https://www.githubstatus.com> shows recovery, then start a new run with the same pre-release choice |
 
 ## 11. Release record
 
@@ -296,9 +314,55 @@ The regular 0.3.0 has the same prompt, and its **Copy Diagnostics** fails on the
 
 Check A was still running on 0.3.3 when this record was written. Whatever its result, it repeats on 0.3.4.
 
+Update, later on 2026-11-11: check A on 0.3.3 stopped before any step in the editor, so it has no result. The
+remote window's extension host had run since 2026-11-10 00:34:43 -08:00 and still ran View Patch 0.2.0, the version
+installed when it started. 0.2.0 has no **Copy Diagnostics** command, and 0.3.3, installed at 10:51:37 -08:00, would
+load only after **Restart Extensions**. View Patch's log in that host was last written on 2026-11-10, so no step had
+run. The identity gate would have rejected the attempt, and the commits made in that clone meanwhile would have
+changed its object counts. Section 6's two added preconditions come from this.
+
 Verdict: none. The attempt stopped under section 4's second rule: the fix, `efe7f82`, changes shipped code, so it
 ships as pre-release 0.3.4 and both checks repeat on it. The three web tests covering the findings fail against
 0.3.3 and pass at `efe7f82`.
+
+### Attempt 2: pre-release 0.3.4, 2026-11-11 (checks pending)
+
+The push moved GitHub `main` from `8dc16e1` to `11d4838`. CI run `43093095901` and CodeQL run `43093095881` passed
+on `11d4838`. Publishing took two runs, both started by hand. Run #7's logs show the pre-release choice; run #6
+never reached a step that reports it.
+
+| Publish run | Attempt | Result | Observation |
+| --- | --- | --- | --- |
+| `43094937518` (#6) | 1 | Failed; nothing published | The four test jobs passed. **Web tests** and **package** waited for an `ubuntu-latest` runner from 20:21:25Z and never started. The run ended at 21:00:44Z with publishing skipped. GitHub's [incident](https://stspg.io/jdjlq5zjyl48) put Actions in a major outage at 20:48:25Z and mitigated it at 21:07:24Z. The Marketplace still had 0.3.3 as its newest version. |
+| `43102614491` (#7) | 1 | Cancelled | Every job was cancelled 35 seconds in (21:23:25Z to 21:24:00Z), before any test finished. |
+| `43102614491` (#7) | 2 | Passed | Every job passed, with Open VSX skipped as configured. Publishing finished at 21:34:15Z. |
+
+Log excerpts from attempt 2's package and publish jobs:
+
+```text
+Packaged view-patch.vsix (pre-release), SHA-256 a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b
+Publishing view-patch.vsix (pre-release), SHA-256 a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b
+Published waddahmoghram.view-patch v0.3.4.
+```
+
+Section 9's Marketplace commands, run with `version=0.3.4` at 21:35:45Z, gave the same digest and a pre-release
+property count of `1`. The package's manifest reads `Version="0.3.4"`, and its `extension/dist/web/extension.js`
+contains `VS Code for the Web cannot run Git`. A pre-release has no GitHub release to download.
+
+The Marketplace's version listing, which editors use to find updates, lagged the download. A query at about
+21:37Z still listed 0.3.3 as newest; at 21:40:26Z it listed 0.3.4, updated 21:38:23Z.
+
+Section 4's stop rule for the source commit was checked against GitHub directly, because this clone has no remote:
+
+```bash
+git fetch https://github.com/waddahmoghram/vscode-view-patch.git main
+git merge-base --is-ancestor a42956a FETCH_HEAD && echo "a42956a is on GitHub main"
+git merge-base --is-ancestor 11d4838 FETCH_HEAD && echo "11d4838 is on GitHub main"
+```
+
+Both lines printed, and `FETCH_HEAD` was `11d48386a020248272add0d61e001482775fd9fc`.
+
+Checks A and B on 0.3.4: pending.
 
 ## 13. Update history
 
@@ -324,3 +388,13 @@ ships as pre-release 0.3.4 and both checks repeat on it. The three web tests cov
 - Changed: section 8's diff gate takes the tested commit from a `tested` variable.
 - Overturned by: the attempt-1 diagnostics and output in section 12, and the three web tests in
   [`src/test/web/suite.test.ts`](src/test/web/suite.test.ts) that fail against 0.3.3 and pass at `efe7f82`.
+
+### 2026-11-11 - 0.3.4 published
+
+- Recorded pre-release 0.3.4's identities in section 3 and its publication in section 12, attempt 2.
+- Changed: section 3's source commit read `a42956a38c8c220bffeaa411c3de7dff2aeb9a3a` (Release 0.3.4), "Local when
+  written". It now names `11d4838`, the commit the Publish run built, which differs from `a42956a` only in this
+  file. Section 8's `tested` follows it.
+- Added: section 6's preconditions for an unshared clone and a new window, with the clone commands; a section 10
+  row for a GitHub incident; and a note in attempt 1 on why check A on 0.3.3 has no result.
+- Spelled out CI and SHA-256 at first use.
