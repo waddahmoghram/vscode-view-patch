@@ -42,6 +42,9 @@ jobs:
       - name: Unit test coverage report
         if: runner.os == 'Linux' && matrix.vscode == 'stable'
         run: npm run test:unit:coverage
+      - name: Check the test plan against the test sources
+        if: runner.os == 'Linux' && matrix.vscode == 'stable'
+        run: node scripts/test-inventory.mjs --check
       - name: Integration tests (virtual display)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:integration
