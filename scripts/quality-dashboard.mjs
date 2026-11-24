@@ -108,24 +108,74 @@ export function testCountsFromLog(jobName, text) {
 }
 
 /**
+ * The Publish run's jobs that print a package digest, each with the parseDigestLines field it prints. They are
+ * matched by their exact names, so that no other job, such as a smoke test of the installed package, is read for a
+ * digest; CI's package job runs in Publish as "verify / package". Only the Open VSX job may be left out, because it
+ * runs only when the repository enables it.
+ */
+const DIGEST_JOBS = [
+    { key: 'packaged', source: 'CI package job', names: ['verify / package', 'package'], required: true },
+    { key: 'publishing', source: 'Marketplace publish job', names: ['publish'], required: true },
+    { key: 'openVsx', source: 'Open VSX publish job', names: ['open-vsx'], required: false },
+];
+
+async function readDigestTarget({ key, required }, job, readLog) {
+    if (!job) {
+        return { state: 'missing', detail: 'not in this run' };
+    }
+    if (job.conclusion === 'skipped') {
+        return { state: 'skipped', detail: required ? 'skipped' : 'skipped, not enabled for this run' };
+    }
+    const succeeded = job.conclusion === 'success';
+    const state = succeeded ? 'unverified' : 'failed';
+    const outcome = succeeded ? '' : `concluded ${job.conclusion ?? job.status}, `;
+    let found;
+    try {
+        found = parseDigestLines(await readLog(job.id));
+    } catch (error) {
+        return { state, detail: `${outcome}log unavailable (${error?.message ?? error})` };
+    }
+    if (!found[key]) {
+        return { state, detail: `${outcome}printed no digest`, found };
+    }
+    return { state: succeeded ? 'recorded' : 'failed', detail: `${outcome}digest recorded`, found };
+}
+
+/**
+ * Reads the digest that each of a Publish run's digest jobs printed; readLog(jobId) returns a job's log. A skipped
+ * job never ran, so its log is not read. Returns the parseDigestLines fields, each from the job that prints it, and
+ * each job's state: recorded, skipped, missing, failed (concluded other than success), or unverified (succeeded
+ * without a readable digest).
+ */
+export async function readDigestTargets(jobs, readLog) {
+    const recorded = { targets: [] };
+    for (const target of DIGEST_JOBS) {
+        const job = jobs.find(entry => target.names.includes(entry.name));
+        const { found, ...result } = await readDigestTarget(target, job, readLog);
+        if (found?.[target.key]) {
+            recorded[target.key] = found[target.key];
+        }
+        if (target.key === 'publishing' && found?.publishedVersion) {
+            recorded.publishedVersion = found.publishedVersion;
+        }
+        recorded.targets.push({ key: target.key, source: target.source, required: target.required, job, ...result });
+    }
+    return recorded;
+}
+
+const describeTarget = target => `${target.source}: ${target.detail}`;
+
+/**
  * Compares the digests that a Publish run recorded, plus the Marketplace's own digest when the Marketplace's latest
- * version is the one that run published. `recorded` is { available, reason } or the parseDigestLines result.
- * Status: match, mismatch, not recorded (fewer than two digests to compare), or unavailable.
+ * version is the one that run published. `recorded` is { available, reason } or the readDigestTargets result.
+ * Status: match, mismatch, not recorded (fewer than two digests to compare), or unavailable: no job logs, or a job
+ * that did not succeed with a digest, unless it is an optional job that the run skipped or lacks.
  */
 export function digestVerdict(recorded, marketplace) {
     if (!recorded?.available) {
         return { status: 'unavailable', detail: recorded?.reason ?? 'no job logs', digests: [] };
     }
-    const digests = [];
-    if (recorded.packaged) {
-        digests.push({ source: 'CI package job', ...recorded.packaged });
-    }
-    if (recorded.publishing) {
-        digests.push({ source: 'Marketplace publish job', ...recorded.publishing });
-    }
-    if (recorded.openVsx) {
-        digests.push({ source: 'Open VSX publish job', ...recorded.openVsx });
-    }
+    const digests = DIGEST_JOBS.flatMap(({ key, source }) => (recorded[key] ? [{ source, ...recorded[key] }] : []));
     if (marketplace?.available && marketplace.vsixSha256 && recorded.publishedVersion === marketplace.version) {
         digests.push({
             source: `Marketplace download of ${marketplace.version}`,
@@ -133,25 +183,29 @@ export function digestVerdict(recorded, marketplace) {
             sha256: marketplace.vsixSha256,
         });
     }
-    if (digests.length < 2) {
-        const detail = digests.length === 0
-            ? 'the run printed no package digest; runs before same-package publishing did not'
-            : `only one digest to compare, from the ${digests[0].source}`;
-        return { status: 'not recorded', detail, digests };
-    }
+    const targets = recorded.targets ?? [];
+    const result = (status, detail) => ({ status, detail, digests, targets });
     const differing = digests.filter(digest => digest.sha256 !== digests[0].sha256);
     if (differing.length > 0) {
-        return {
-            status: 'mismatch',
-            detail: `${differing.map(digest => digest.source).join(', ')}: digest differs from the ${digests[0].source}`,
-            digests,
-        };
+        return result('mismatch',
+            `${differing.map(digest => digest.source).join(', ')}: digest differs from the ${digests[0].source}`);
     }
     const channels = [...new Set(digests.flatMap(digest => digest.channel ?? []))];
     if (channels.length > 1) {
-        return { status: 'mismatch', detail: `the digests agree but the channels differ: ${channels.join(' and ')}`, digests };
+        return result('mismatch', `the digests agree but the channels differ: ${channels.join(' and ')}`);
     }
-    return { status: 'match', detail: `${digests.length} digests agree`, digests };
+    const leftOut = target => !target.required && (target.state === 'skipped' || target.state === 'missing');
+    const unverified = targets.filter(target => target.state !== 'recorded' && !leftOut(target));
+    if (unverified.length > 0) {
+        return result('unavailable', unverified.map(describeTarget).join('; '));
+    }
+    if (digests.length < 2) {
+        return result('not recorded', digests.length === 0
+            ? 'the run printed no package digest; runs before same-package publishing did not'
+            : `only one digest to compare, from the ${digests[0].source}`);
+    }
+    const notes = targets.filter(leftOut).map(describeTarget);
+    return result('match', [`${digests.length} digests agree`, ...notes].join('; '));
 }
 
 function median(values) {
@@ -163,7 +217,11 @@ function median(values) {
     return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-const elapsed = (start, end) => (start && end ? Date.parse(end) - Date.parse(start) : undefined);
+// Undefined unless both times are valid and in order; GitHub gives a skipped job a completion before its start.
+function elapsed(start, end) {
+    const ms = Date.parse(end) - Date.parse(start);
+    return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
+}
 
 /**
  * Summarizes a workflow's runs, newest first. CI and CodeQL keep runs on main that a pull request did not start.
@@ -466,6 +524,16 @@ started ${escapeHtml(formatTime(run.startedAt))}.</p>`
         ? table('Recorded package digests', ['Source', 'Channel', 'SHA-256'], digests.digests.map(digest => [
             escapeHtml(digest.source), escapeHtml(digest.channel ?? '—'), `<code class="digest">${escapeHtml(digest.sha256)}</code>`]))
         : '';
+    const targetTable = digests.targets?.length > 0
+        ? table('Publish run jobs that record the package digest', ['Digest source', 'Job', 'Result', 'Digest',
+            'Duration'], digests.targets.map(target => [
+            escapeHtml(target.source),
+            target.job ? link(target.job.name, target.job.url) : '—',
+            target.job ? badge(target.job.conclusion ?? target.job.status) : '—',
+            escapeHtml(target.detail),
+            escapeHtml(formatDuration(target.job?.durationMs)),
+        ]))
+        : '';
     const marketplace = report.marketplace;
     const openVsx = report.openVsx;
     const registries = [
@@ -490,6 +558,7 @@ started ${escapeHtml(formatTime(run.startedAt))}.</p>`
 ${publish}
 <p>Package digests: ${badge(digests.status)} ${escapeHtml(digests.detail)}</p>
 ${digestTable}
+${targetTable}
 ${table('Registries', ['Registry', 'Latest version', 'Channel', 'Installs', 'Downloads', 'Updates', 'Last updated'],
         registries)}
 ${local}
@@ -594,7 +663,10 @@ runs are left out. A re-run is a run whose latest attempt is not its first, a si
 infrastructure.</li>
 <li>Package digests come from the latest successful Publish run, or the latest completed one when none succeeded.
 The CI package job, each publishing job, and the Marketplace's download of the version that run published must
-all agree.</li>
+all agree. The Open VSX job runs only when it is enabled; a run that skipped it shows it as skipped and leaves it
+out. Every other job, and an Open VSX job that ran, must succeed and print its digest, or the result is
+unavailable unless the digests already disagree. A duration that a job's or run's times cannot give, such as a
+skipped job's, is unavailable: it is shown as — and left out of medians.</li>
 <li>Test counts are the runners' own summaries in the latest CI run's job logs on ${repository}.</li>
 <li>Registry figures are as the Visual Studio Marketplace and Open VSX report them.</li>
 </ul>
@@ -655,6 +727,7 @@ export function renderMarkdown(report) {
         '| --- | --- |',
         ...WORKFLOWS.map(({ id, name }) => `| ${name} | ${cell(workflowText(report.workflows[id]))} |`),
         `| Package digests | ${cell(`${report.digests.status}: ${report.digests.detail}`)} |`,
+        `| Digest jobs | ${cell(report.digests.targets?.map(describeTarget).join('; ') || undefined)} |`,
         `| Test counts | ${cell(tests)} |`,
         `| Marketplace | ${cell(registry)} |`,
         `| Open VSX | ${cell(openVsxText)} |`,
@@ -790,11 +863,7 @@ export async function collect({
         if (!token || !publishRun.available) {
             throw new Error(token ? publishRun.reason : needsToken);
         }
-        const logs = [];
-        for (const job of publishRun.jobs.filter(entry => /(?:^|\/ )(?:package|publish|open-vsx)$/.test(entry.name))) {
-            logs.push(await github.text(`${base}/actions/jobs/${job.id}/logs`));
-        }
-        return parseDigestLines(logs.join('\n'));
+        return readDigestTargets(publishRun.jobs, id => github.text(`${base}/actions/jobs/${id}/logs`));
     });
     const dependabot = await attempt(async () => ({
         pulls: dependabotPulls(await github.json(`${base}/pulls?state=open&per_page=100`), now),

@@ -139,7 +139,10 @@ continuous integration (CI) or Publish run on `main` or a release tag finishes. 
   jobs, and the test counts that its logs report.
 - The digests that Publish run recorded, next to the Marketplace's own digest of the version it published; the
   Marketplace's latest version, channel, and install, download, and update counts; the Open VSX listing; and open
-  Dependabot pull requests.
+  Dependabot pull requests. A run that skipped the Open VSX job, as it does while `OPEN_VSX_PUBLISHING` is unset,
+  shows that job as skipped and compares the others. The package and Marketplace publish jobs, and an Open VSX job
+  that ran, must each succeed and print a digest; otherwise the digest rule cannot be evaluated, unless the digests
+  already disagree.
 
 Every run adds a summary to its own run page and keeps the site for a day as its `github-pages` artifact. To
 publish the site with GitHub Pages:

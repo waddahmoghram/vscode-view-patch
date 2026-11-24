@@ -14,6 +14,7 @@ interface Dashboard {
     testCountsFromLog(jobName: string, text: string): Json;
     digestVerdict(recorded: Json, marketplace?: Json): Json;
     summarizeRuns(runs: Json[], options?: { publish?: boolean }): Json;
+    summarizeJobs(jobs: Json[]): Json[];
     parseMarketplace(body: Json): Json;
     parseOpenVsx(status: number, body: Json): Json;
     dependabotPulls(pulls: Json[], now: Date): Json[];
@@ -223,6 +224,26 @@ describe('quality dashboard verdicts', () => {
         assert.deepEqual(publish.runs.map((entry: Json) => entry.ref), ['v0.3.2', 'main']);
     });
 
+    test('reports a reversed, invalid, or missing duration as unavailable and leaves it out of the median', async () => {
+        const { summarizeJobs, summarizeRuns } = await load();
+        const durations = summarizeJobs([
+            // GitHub's times for the skipped open-vsx job of Publish run 43115767355.
+            { ...job(1, 'open-vsx'), conclusion: 'skipped', started_at: '2026-11-11T23:00:47Z',
+                completed_at: '2026-11-11T23:00:46Z' },
+            { ...job(2, 'publish'), completed_at: 'not a time' },
+            { ...job(3, 'verify / package'), completed_at: null },
+            job(4, 'verify / package'),
+        ]).map((entry: Json) => entry.durationMs);
+        assert.deepEqual(durations, [undefined, undefined, undefined, 70_000]);
+        const summary = summarizeRuns([
+            run({ id: 2, run_number: 2, updated_at: '2026-11-11T05:59:00Z' }),
+            run({ id: 1, run_number: 1, created_at: '2026-11-10T06:00:00Z', run_started_at: '2026-11-10T06:00:00Z',
+                updated_at: '2026-11-10T06:04:00Z' }),
+        ]);
+        assert.deepEqual(summary.runs.map((entry: Json) => entry.durationMs), [undefined, 240_000]);
+        assert.equal(summary.medianDurationMs, 240_000);
+    });
+
     test('reads the Marketplace query and treats an Open VSX 404 as not listed', async () => {
         const { parseMarketplace, parseOpenVsx } = await load();
         assert.deepEqual(parseMarketplace(MARKETPLACE), {
@@ -357,6 +378,10 @@ function routes(pullTitle = 'Bump esbuild'): Record<string, () => Json> {
     };
 }
 
+const publishJobs = (...jobs: Json[]): () => Json => () => respond(200, { jobs });
+const logsRead = (sent: Sent[]): string[] =>
+    sent.filter(request => request.url.endsWith('/logs')).map(request => request.url.slice(API.length));
+
 describe('quality dashboard collection', () => {
     test('stays within six unauthenticated GitHub requests and leaves log-derived values unavailable', async () => {
         const { collect } = await load();
@@ -389,6 +414,87 @@ describe('quality dashboard collection', () => {
         assert.ok(sent.filter(isGitHub).every(request => request.init.headers.Authorization === 'Bearer secret-token'));
         assert.ok(sent.filter(request => !isGitHub(request))
             .every(request => !JSON.stringify(request.init).includes('secret-token')));
+    });
+
+    test('reads no log for a publishing job that the run skipped and compares the other digests', async () => {
+        const { collect, renderHtml, renderMarkdown } = await load();
+        const sent: Sent[] = [];
+        const skipped = routes();
+        // As in Publish run 43115767355, where OPEN_VSX_PUBLISHING was unset: the skipped job has no log.
+        skipped[`${API}/actions/runs/103/jobs?per_page=100`] = publishJobs(job(302, 'verify / package'),
+            job(303, 'publish'), { ...job(304, 'open-vsx'), conclusion: 'skipped', started_at: '2026-11-11T06:01:11Z',
+                completed_at: '2026-11-11T06:01:10Z' });
+        delete skipped[`${API}/actions/jobs/304/logs`];
+        const report = await collect({ repository: 'o/r', token: 'secret-token', now: NOW, fetch: fakeFetch(skipped, sent) });
+        assert.ok(!logsRead(sent).includes('/actions/jobs/304/logs'));
+        assert.equal(report.digests.status, 'match');
+        assert.equal(report.digests.detail, '3 digests agree; Open VSX publish job: skipped, not enabled for this run');
+        assert.deepEqual(report.digests.digests.map((digest: Json) => digest.source),
+            ['CI package job', 'Marketplace publish job', 'Marketplace download of 0.3.2']);
+        assert.equal(report.readiness.verdict, 'ready');
+        assert.match(renderHtml(report), new RegExp('<th scope="row">Open VSX publish job</th><td><a [^>]+>open-vsx</a></td>'
+            + '<td><span class="badge neutral">– skipped</span></td><td>skipped, not enabled for this run</td><td>—</td>'));
+        assert.match(renderMarkdown(report),
+            /\| Digest jobs \| CI package job: digest recorded; .*; Open VSX publish job: skipped, not enabled for this run \|/);
+    });
+
+    test('leaves digests unavailable when the package or Marketplace publish job has no readable digest', async () => {
+        const { collect } = await load();
+        const noLog = routes();
+        delete noLog[`${API}/actions/jobs/303/logs`];
+        const missing = await collect({ repository: 'o/r', token: 'secret-token', now: NOW, fetch: fakeFetch(noLog, []) });
+        assert.equal(missing.digests.status, 'unavailable');
+        assert.equal(missing.digests.detail,
+            'Marketplace publish job: log unavailable (GitHub returned 404 for /repos/o/r/actions/jobs/303/logs)');
+        const unprinted = routes();
+        unprinted[`${API}/actions/jobs/302/logs`] = () => respond(200, log('Packaged: view-patch.vsix (23 files, 130.25 KB)'));
+        const silent = await collect({ repository: 'o/r', token: 'secret-token', now: NOW, fetch: fakeFetch(unprinted, []) });
+        assert.equal(silent.digests.status, 'unavailable');
+        assert.equal(silent.digests.detail, 'CI package job: printed no digest');
+        for (const report of [missing, silent]) {
+            assert.deepEqual([report.readiness.rules[2].status, report.readiness.verdict], ['unknown', 'undetermined']);
+        }
+    });
+
+    test('keeps an Open VSX job that ran without a matching digest visible as failed or unverified', async () => {
+        const { collect, renderHtml } = await load();
+        const collectWith = (openVsx: Json, openVsxLog: string): Promise<Json> => {
+            const attempted = routes();
+            attempted[`${API}/actions/runs/103/jobs?per_page=100`] =
+                publishJobs(job(302, 'verify / package'), job(303, 'publish'), openVsx);
+            attempted[`${API}/actions/jobs/304/logs`] = () => respond(200, openVsxLog);
+            return collect({ repository: 'o/r', token: 'secret-token', now: NOW, fetch: fakeFetch(attempted, []) });
+        };
+        const failed = await collectWith({ ...job(304, 'open-vsx'), conclusion: 'failure' }, log('npm error code E401'));
+        assert.deepEqual([failed.digests.status, failed.digests.detail],
+            ['unavailable', 'Open VSX publish job: concluded failure, printed no digest']);
+        assert.equal(failed.readiness.verdict, 'undetermined');
+        assert.match(renderHtml(failed),
+            /<td><span class="badge fail">✗ failure<\/span><\/td><td>concluded failure, printed no digest<\/td>/);
+        const unprinted = await collectWith(job(304, 'open-vsx'), log('Published waddahmoghram.view-patch v0.3.2.'));
+        assert.deepEqual([unprinted.digests.status, unprinted.digests.detail],
+            ['unavailable', 'Open VSX publish job: printed no digest']);
+        const differing = await collectWith({ ...job(304, 'open-vsx'), conclusion: 'failure' },
+            log(`Publishing view-patch.vsix to Open VSX, SHA-256 ${OTHER}`));
+        assert.deepEqual([differing.digests.status, differing.digests.detail],
+            ['mismatch', 'Open VSX publish job: digest differs from the CI package job']);
+    });
+
+    test('reads digests only from the package, publish, and Open VSX jobs, not other jobs named like them', async () => {
+        const { collect } = await load();
+        const sent: Sent[] = [];
+        const lookalikes = routes();
+        lookalikes[`${API}/actions/runs/103/jobs?per_page=100`] = publishJobs(job(302, 'verify / package'),
+            job(305, 'verify / Installed VSIX smoke test'), job(306, 'verify / package smoke test'),
+            job(307, 'smoke / package'), job(303, 'publish'), job(304, 'open-vsx'));
+        for (const id of [305, 306, 307]) {
+            lookalikes[`${API}/actions/jobs/${id}/logs`] =
+                () => respond(200, log(`Packaged view-patch.vsix (pre-release), SHA-256 ${OTHER}`));
+        }
+        const report = await collect({ repository: 'o/r', token: 'secret-token', now: NOW, fetch: fakeFetch(lookalikes, sent) });
+        assert.deepEqual(logsRead(sent), ['/actions/jobs/201/logs', '/actions/jobs/202/logs', '/actions/jobs/302/logs',
+            '/actions/jobs/303/logs', '/actions/jobs/304/logs']);
+        assert.deepEqual([report.digests.status, report.digests.detail], ['match', '4 digests agree']);
     });
 
     test('turns failing sources into unavailable entries instead of throwing', async () => {

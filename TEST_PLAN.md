@@ -92,7 +92,7 @@ Each row names the files that guard a risk and representative tests from them, q
 | R12 | all desktop layers | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | The `vscode: 1.90.0` matrix leg repeats the unit, editor, and Restricted Mode suites on the oldest supported VS Code. |
 | R13 | packaging gate | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Steps **Audit dependency vulnerabilities**, **Package**, and **Record the package digest** in the `package` job. |
 | R13 | publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml) | Steps **Check that the tag matches package.json**, **Download the package that CI verified**, and **Check the package's channel and record its digest** in `publish`; **Record the package digest** in `open-vsx`. |
-| R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match" |
+| R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match"; "reads no log for a publishing job that the run skipped and compares the other digests"; "leaves digests unavailable when the package or Marketplace publish job has no readable digest"; "keeps an Open VSX job that ran without a matching digest visible as failed or unverified"; "reads digests only from the package, publish, and Open VSX jobs, not other jobs named like them" |
 
 <!-- traceability:end -->
 
@@ -112,7 +112,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                         | Test sources                        | Count |
 | ---------- | ---------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   362 |
+| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   367 |
 | editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
 | restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     6 |
