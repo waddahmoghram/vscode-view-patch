@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import { writeFileSync } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ShownPatch, ViewPatchApi } from '../../extension';
@@ -63,6 +64,47 @@ suite('Review workflow commands', () => {
             'the desktop extension host has Node, so the platform line must name it');
         assert.match(text, /Git version: git version \d/);
         assert.match(text, /Open reviews: \d+/);
+    });
+
+    test('previews a redacted problem report and, when cancelled, copies and opens nothing', async () => {
+        const gitExtension = vscode.extensions.getExtension<{ getAPI(version: 1): unknown }>('vscode.git');
+        assert.ok(gitExtension);
+        const exports = (gitExtension.isActive ? gitExtension.exports : await gitExtension.activate()) as
+            { getAPI: unknown };
+        const getAPI = exports.getAPI;
+        // A Git executable under the home folder, as a custom git.path would give, so it reaches the report.
+        const executable = path.join(os.homedir(), '.view-patch-test', 'bin', 'git');
+        exports.getAPI = () => ({ git: { path: executable }, repositories: [] });
+        try {
+            await vscode.env.clipboard.writeText('clipboard before the report');
+            const { prompts, opened } = await withReportPrompt(() => undefined, async () => {
+                assert.strictEqual(await vscode.commands.executeCommand('viewPatch.reportProblem'), false);
+            });
+            assert.strictEqual(prompts.length, 1);
+            const preview = prompts[0].preview ?? '';
+            assert.match(preview, /^View Patch problem report\n/);
+            assert.match(preview, /^Git executable: ~[\\/]\.view-patch-test[\\/]bin[\\/]git$/m);
+            assert.ok(!preview.includes(os.homedir()), `the preview must not contain the home folder:\n${preview}`);
+            assert.match(preview, /^Not included: patch content, clipboard content, repository paths/m);
+            assert.strictEqual(await vscode.env.clipboard.readText(), 'clipboard before the report');
+            assert.deepStrictEqual(opened, []);
+        } finally {
+            exports.getAPI = getAPI;
+        }
+    });
+
+    test('copies the previewed report and opens the issue form with no report content in its address', async () => {
+        const { prompts, opened } = await withReportPrompt(
+            items => items.find(item => item === 'Copy Report and Open Issue Form'),
+            async () => {
+                assert.strictEqual(await vscode.commands.executeCommand('viewPatch.reportProblem'), true);
+            },
+        );
+        assert.strictEqual(prompts.length, 1);
+        assert.match(prompts[0].preview ?? '', /^View Patch problem report\n/);
+        assert.strictEqual(await vscode.env.clipboard.readText(), prompts[0].preview);
+        assert.deepStrictEqual(opened.map(uri => uri.toString(true)),
+            ['https://github.com/waddahmoghram/vscode-view-patch/issues/new?template=bug_report.yml']);
     });
 
     test('marks every file reviewed, exports the summary, then clears the checkmarks', async () => {
@@ -390,6 +432,41 @@ suite('Review workflow commands', () => {
 
 function settings(): vscode.WorkspaceConfiguration {
     return vscode.workspace.getConfiguration('viewPatch');
+}
+
+interface ReportPrompt {
+    readonly items: readonly unknown[];
+    /** The active editor's text when the prompt appeared. */
+    readonly preview?: string;
+}
+
+/** Answers the report prompt and records external opens instead of launching a browser. */
+async function withReportPrompt(
+    answer: (items: readonly unknown[]) => unknown,
+    run: () => Promise<void>,
+): Promise<{ prompts: ReportPrompt[]; opened: vscode.Uri[] }> {
+    const window = vscode.window as { showInformationMessage: unknown };
+    const env = vscode.env as { openExternal: unknown };
+    const show = window.showInformationMessage;
+    const openExternal = env.openExternal;
+    const prompts: ReportPrompt[] = [];
+    const opened: vscode.Uri[] = [];
+    window.showInformationMessage = async (_message: string, ...rest: unknown[]) => {
+        const items = rest.filter(item => typeof item === 'string');
+        prompts.push({ items, preview: vscode.window.activeTextEditor?.document.getText() });
+        return answer(items);
+    };
+    env.openExternal = async (uri: vscode.Uri) => {
+        opened.push(uri);
+        return true;
+    };
+    try {
+        await run();
+    } finally {
+        window.showInformationMessage = show;
+        env.openExternal = openExternal;
+    }
+    return { prompts, opened };
 }
 
 async function readSide(shown: ShownPatch, suffix: string): Promise<{ before?: string; after?: string }> {

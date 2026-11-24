@@ -165,8 +165,12 @@ a leading `~` in an extra repository path means your home folder.
 
 View Patch does not collect telemetry, contact a hosting service, or fetch missing objects. The **View Patch** output
 channel (**View** > **Output**) explains repository selection, cancellation, limits, and Git failures.
-For a bug report, **View Patch: Copy Diagnostics** puts the version, editor, platform, and Git details on the
-clipboard, and **Open Sample Patch** checks an install without touching any repository.
+For a bug report, **View Patch: Report a Problem...** (also in the Patch Reviews view's **...** menu and on View
+Patch error messages) opens a preview of the version, editor, platform, and Git details. Only if you confirm does it
+copy that text and open the GitHub issue form in your browser; nothing is sent for you. The report leaves out patch
+content, clipboard content, repository paths, Git arguments, and the output log, and shows your home folder as `~`
+and workspace folders as `<workspace>`. **View Patch: Copy Diagnostics** copies the same redacted details without
+the preview, and **Open Sample Patch** checks an install without touching any repository.
 
 ### Common first-run errors
 

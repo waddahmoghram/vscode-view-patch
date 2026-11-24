@@ -17,6 +17,7 @@ import {
 } from './operations';
 import { AppliedPatch, applyPatch, ChangeStatus, commitChanges, compareApplied, FileDiffInput, fileDiffStats, looksLikePatch, mergeChanges, patchCommit, SkippedChange, unifiedFileDiff } from './patch';
 import { hasCombinedDiff, HunkFile, parseCombinedParts, parseHunks, PatchMetadata, splitPatchMessages } from './patchText';
+import { ISSUE_FORM_URL, problemReport, redactPaths } from './problemReport';
 import { findRepositories, hasCommit, isRevision, parentOf, PatchTarget, resolvePatch, topLevel } from './repositories';
 import {
     preserveReviewed,
@@ -90,10 +91,13 @@ const RECENT_KEY = 'recentPatches';
 const RECENT_LIMIT = 25;
 const COMPARE_SCHEME = 'view-patch-compare';
 const COMMIT_SCHEME = 'view-patch-commit';
+const REPORT_SCHEME = 'view-patch-report';
 
 const CHOOSE = 'Choose Repository and Base...';
 const HUNKS_ONLY = 'View Hunks Only';
 const OUTPUT = 'Show Output';
+const REPORT_PROBLEM = 'Report a Problem';
+const COPY_REPORT = 'Copy Report and Open Issue Form';
 const MIB = 1024 * 1024;
 const WEB_NO_GIT = 'VS Code for the Web cannot run Git.';
 
@@ -118,6 +122,8 @@ export class ReviewController implements vscode.Disposable {
     private syncTimer?: ReturnType<typeof setTimeout>;
     private disposed = false;
     private explainedWebHunks = false;
+    private latestReport?: { readonly uri: string; readonly text: string };
+    private reports = 0;
 
     constructor(private readonly log: vscode.LogOutputChannel, private readonly state: vscode.Memento) {
         this.view = vscode.window.createTreeView('viewPatch.reviews', {
@@ -150,6 +156,11 @@ export class ReviewController implements vscode.Disposable {
             vscode.window.tabGroups.onDidChangeTabs(() => this.scheduleSync()),
             vscode.window.tabGroups.onDidChangeTabGroups(() => this.scheduleSync()),
             vscode.workspace.onDidSaveTextDocument(document => this.sourceSaved(document)),
+            vscode.workspace.registerTextDocumentContentProvider(REPORT_SCHEME, {
+                provideTextDocumentContent: uri => uri.toString() === this.latestReport?.uri
+                    ? this.latestReport.text
+                    : 'Run "View Patch: Report a Problem..." to build a current report.\n',
+            }),
         );
     }
 
@@ -585,14 +596,53 @@ export class ReviewController implements vscode.Disposable {
     }
 
     async copyDiagnostics(): Promise<string> {
+        const text = await this.diagnostics();
+        await vscode.env.clipboard.writeText(text);
+        this.log.info(`Diagnostics copied:\n${text}`);
+        vscode.window.setStatusBarMessage('View Patch: diagnostics copied to the clipboard.', 4000);
+        return text;
+    }
+
+    /** Previews a redacted report; only if the user confirms is it copied and the issue form opened. */
+    async reportProblem(): Promise<boolean> {
+        const text = problemReport(await this.diagnostics());
+        const uri = vscode.Uri.from({
+            scheme: REPORT_SCHEME, path: '/View Patch Problem Report', query: String(++this.reports),
+        });
+        this.latestReport = { uri: uri.toString(), text };
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
+        const answer = await vscode.window.showInformationMessage(
+            'View Patch: copy this problem report and open the GitHub issue form?',
+            {
+                modal: true,
+                detail: 'The report is open in the editor for review. Nothing has been sent: this copies the report'
+                    + ' to the clipboard and opens the issue form in your browser, where you decide what to submit.',
+            },
+            COPY_REPORT,
+        );
+        if (answer !== COPY_REPORT) {
+            return false;
+        }
+        await vscode.env.clipboard.writeText(text);
+        const opened = await vscode.env.openExternal(vscode.Uri.parse(ISSUE_FORM_URL));
+        vscode.window.setStatusBarMessage(opened
+            ? 'View Patch: problem report copied. Paste it into the issue form.'
+            : `View Patch: problem report copied. The issue form is at ${ISSUE_FORM_URL}`, 8000);
+        return true;
+    }
+
+    private async diagnostics(): Promise<string> {
         const api = await this.gitApi();
         const executable = gitExecutable(api);
         const runsGit = hostRunsGit();
+        let home: string | undefined;
         let gitVersion = `unavailable: ${WEB_NO_GIT}`;
         if (runsGit) {
+            // Only here: the web host has no home folder, and its os shim throws.
+            home = os.homedir();
             try {
                 const output = await new Git(executable).run(
-                    ['--version'], { cwd: os.homedir(), timeoutMs: 10_000, maxOutputBytes: 4096 });
+                    ['--version'], { cwd: home, timeoutMs: 10_000, maxOutputBytes: 4096 });
                 gitVersion = output.toString('utf8').trim();
             } catch (error) {
                 gitVersion = `unavailable: ${firstLines(errorMessage(error))}`;
@@ -616,10 +666,11 @@ export class ReviewController implements vscode.Disposable {
             `viewPatch.repositories entries: ${Array.isArray(configured) ? configured.length : '(invalid)'}`,
             `Open reviews: ${this.reviews.size}`,
         ].join('\n') + '\n';
-        await vscode.env.clipboard.writeText(text);
-        this.log.info(`Diagnostics copied:\n${text}`);
-        vscode.window.setStatusBarMessage('View Patch: diagnostics copied to the clipboard.', 4000);
-        return text;
+        return redactPaths(text, {
+            home,
+            workspaces: vscode.workspace.workspaceFolders
+                ?.filter(folder => folder.uri.scheme === 'file').map(folder => folder.uri.fsPath),
+        });
     }
 
     /** Applies this review's patch and another version to the same base, then shows the result difference. */
@@ -744,10 +795,12 @@ export class ReviewController implements vscode.Disposable {
         const text = errorMessage(error);
         this.log.error(name ? `${name}: ${text}` : text);
         void vscode.window.showErrorMessage(
-            `View Patch: ${name ? `${name}: ` : ''}${firstLines(text)}`, OUTPUT,
+            `View Patch: ${name ? `${name}: ` : ''}${firstLines(text)}`, OUTPUT, REPORT_PROBLEM,
         ).then(answer => {
             if (answer === OUTPUT) {
                 this.log.show(true);
+            } else if (answer === REPORT_PROBLEM) {
+                void this.reportProblem().catch(failure => this.report(failure));
             }
         });
     }
