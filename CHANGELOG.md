@@ -7,6 +7,8 @@
   only after you confirm copies them and opens the GitHub issue form. Nothing is sent, and no report content is
   put in the form's address.
 - **Copy Diagnostics** now hides the home and workspace folder paths in the same way.
+- Dropping a single patch file on the Patch Reviews view now opens that patch, instead of the patch in the active
+  editor or a file dialog.
 - GitHub releases now carry that version's changelog section, the Marketplace link, and the package's SHA-256
   instead of a pointer to this file.
 
