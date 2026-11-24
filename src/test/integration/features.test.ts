@@ -107,6 +107,17 @@ suite('Review workflow commands', () => {
             ['https://github.com/waddahmoghram/vscode-view-patch/issues/new?template=bug_report.yml']);
     });
 
+    test('opens a single patch dropped on Patch Reviews, not the patch in the active editor', async () => {
+        const decoy = patchFile();
+        await vscode.window.showTextDocument(decoy);
+        const dropped = patchFile();
+        const data = new vscode.DataTransfer();
+        data.set('text/uri-list', new vscode.DataTransferItem(`${dropped.toString()}\r\n`));
+        const shown = await api.reviews.openDropped(data);
+        assert.strictEqual(shown.length, 1);
+        assert.ok(shown[0].title.startsWith(`${path.basename(dropped.fsPath)} `), shown[0].title);
+    });
+
     test('marks every file reviewed, exports the summary, then clears the checkmarks', async () => {
         const shown = await open(patchFile());
         await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: shown.id });

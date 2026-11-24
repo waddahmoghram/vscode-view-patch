@@ -132,20 +132,7 @@ export class ReviewController implements vscode.Disposable {
                 dropMimeTypes: ['text/uri-list'],
                 dragMimeTypes: [],
                 handleDrop: async (_target, data) => {
-                    const text = await data.get('text/uri-list')?.asString();
-                    const dropped = (text ?? '').split(/\r?\n/)
-                        .filter(line => line && !line.startsWith('#'))
-                        .flatMap(line => {
-                            try {
-                                return [vscode.Uri.parse(line, true)];
-                            } catch {
-                                return [];
-                            }
-                        })
-                        .filter(uri => /\.(patch|diff)$/i.test(uri.path));
-                    if (dropped.length) {
-                        await this.open(undefined, dropped);
-                    }
+                    await this.openDropped(data);
                 },
             },
         });
@@ -180,6 +167,23 @@ export class ReviewController implements vscode.Disposable {
             }
         }
         return shown;
+    }
+
+    /** Opens the `.patch` and `.diff` files dropped on the Patch Reviews view. */
+    async openDropped(data: vscode.DataTransfer): Promise<ShownPatch[]> {
+        const text = await data.get('text/uri-list')?.asString();
+        const dropped = (text ?? '').split(/\r?\n/)
+            .filter(line => line && !line.startsWith('#'))
+            .flatMap(line => {
+                try {
+                    return [vscode.Uri.parse(line, true)];
+                } catch {
+                    return [];
+                }
+            })
+            .filter(uri => /\.(patch|diff)$/i.test(uri.path));
+        // Passing the first file as well, since a one-item selection alone falls back to the active editor.
+        return dropped.length ? this.open(dropped[0], dropped) : [];
     }
 
     async refresh(reference?: unknown): Promise<ShownPatch | undefined> {
