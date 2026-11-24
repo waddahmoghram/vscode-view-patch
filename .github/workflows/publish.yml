@@ -103,9 +103,15 @@ jobs:
     permissions:
       id-token: write # exchange for a short-lived Open VSX token when Trusted Publishing is used
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # The same check as in publish: this job does not wait for that one, so it must not upload a tagged version
+      # that has no CHANGELOG.md section either.
+      - name: Check that CHANGELOG.md has a section for the tag
+        if: github.event_name == 'push'
+        run: node scripts/release-notes.mjs --tag "${GITHUB_REF_NAME}" > /dev/null
       - name: Download the package that CI verified
         uses: actions/download-artifact@v8
         with:

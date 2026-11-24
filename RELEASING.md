@@ -93,10 +93,10 @@ give a regular release a version higher than the latest pre-release for pre-rele
    missing or empty section stops the run before anything is published. It publishes that file and attaches the same
    file, with those notes, to a GitHub release. Concurrent publishing runs are serialized. To preview the notes, run
    `node scripts/release-notes.mjs`.
-1. When Open VSX publishing is enabled, a separate job publishes the same file there and records its digest. If only
-   that job fails, re-run it alone; re-running the whole workflow would try to publish the Marketplace version
-   again, which the Marketplace refuses. To add a version that is already on the Marketplace, publish its `.vsix`
-   by hand with `npx ovsx publish view-patch.vsix -p <token>`.
+1. When Open VSX publishing is enabled, a separate job checks for the same `CHANGELOG.md` section, then publishes the
+   same file there and records its digest. If only that job fails, re-run it alone; re-running the whole workflow
+   would try to publish the Marketplace version again, which the Marketplace refuses. To add a version that is
+   already on the Marketplace, publish its `.vsix` by hand with `npx ovsx publish view-patch.vsix -p <token>`.
 
 ## Pre-releases
 
