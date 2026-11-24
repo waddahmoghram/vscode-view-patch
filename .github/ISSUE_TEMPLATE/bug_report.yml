@@ -8,7 +8,7 @@ body:
       label: View Patch version and install source
       description: Extensions view > View Patch. Say whether it is a pre-release and whether it came from the
         Marketplace or a .vsix file.
-      placeholder: 0.3.5 from the Marketplace
+      placeholder: 0.3.7 from the Marketplace
     validations:
       required: true
   - type: input
@@ -37,7 +37,8 @@ body:
     id: log
     attributes:
       label: View Patch problem report
-      description: Run "View Patch: Report a Problem..." and paste the report it copies. It shows your home folder
+      description: >-
+        Run "View Patch: Report a Problem..." and paste the report it copies. It shows your home folder
         as ~ and leaves out patch content and repository paths. Add lines from the View Patch output log only after
         removing private paths.
       render: text
