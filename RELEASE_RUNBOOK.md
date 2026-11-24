@@ -5,15 +5,19 @@ general procedure and one-time setup; [TEST_PLAN.md](TEST_PLAN.md) names the aut
 the manual checks a regular release needs, the tag-driven publish, and the exit verification, with the decision
 rules for each step.
 
-> **Status:** COMPLETE for regular 0.3.5, published 2026-11-11 by pushing tag `v0.3.5`. Attempt 1 checked
-> pre-release 0.3.3 and found two web defects (section 12); their fix shipped as pre-release 0.3.4, on which both
-> checks passed the same day (attempt 2), and the exit verification of 0.3.5 passed.
+> **Status:** IN PROGRESS for regular 0.3.7 from pre-release 0.3.6. On 2026-11-24 every expected result of both
+> checks held, but two runs used substitutes (section 12): check A ran in a `code serve-web` window instead of
+> Remote - SSH, and check B's steps 6 and 7 used a saved patch, because vscode.dev now requires a GitHub sign-in.
+> Those two runs as written, the tag, and the exit verification are pending. Regular 0.3.5 was published on
+> 2026-11-11 (section 12).
 >
-> **Current verdict:** PASS.
+> **Current verdict:** none yet.
 >
-> **Controlling corrections:** [2026-11-11 review correction](#2026-11-11---review-correction): the release
-> target moved from 0.3.4 to 0.3.5. [Check B step 5 correction](#2026-11-11---check-b-step-5-correction): a
-> file-backed patch now tests saving on the web.
+> **Controlling corrections:** [2026-11-24 0.3.7 campaign](#2026-11-24---037-campaign): the release commit is
+> made on the tested source commit and tagged there, because `main` moved past that commit.
+> [2026-11-11 review correction](#2026-11-11---review-correction): the release target moved from 0.3.4 to 0.3.5.
+> [Check B step 5 correction](#2026-11-11---check-b-step-5-correction): a file-backed patch now tests saving on
+> the web.
 
 ## 1. Purpose
 
@@ -57,12 +61,12 @@ The question each campaign answers: is the candidate commit safe to publish on t
 
 | Item | Value | Evidence |
 | --- | --- | --- |
-| Release version | `0.3.5` | Higher than the latest pre-release, as [RELEASING.md](RELEASING.md#release-channels) requires |
-| Pre-release under test | `0.3.4` | Marketplace download, validated 2026-11-11T21:35:45Z |
-| Its source commit | `11d48386a020248272add0d61e001482775fd9fc` | The commit Publish run `43102614491` built; it differs from the Release 0.3.4 commit `a42956a` only in this file |
-| Its package SHA-256 | `a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b` | Packaging job `130801344413`, publish job `130802978286` (that run's attempt 2), and the Marketplace download all equal |
+| Release version | `0.3.7` | Higher than the latest pre-release, as [RELEASING.md](RELEASING.md#release-channels) requires |
+| Pre-release under test | `0.3.6` | Marketplace download, 2026-11-24 |
+| Its source commit | `6f0f88b1c3c28ab128e331c78ad48c3abe704060` | The commit Publish run `45348403770` built; CI run `45347481251` and CodeQL run `45347481178` passed on it |
+| Its package SHA-256 | `e3d3f4de54507da3b6d9df4cd25d81d1cd34912b99d9cdee92e2e88f0a0ef8ab` | Packaging job `138289840286`, publish job `138290358037`, and the Marketplace download all equal |
 | Remote-check patch | `git format-patch -1 ad2e6ec`, four files, parent `0aef85b` | `git show --stat ad2e6ec` |
-| Release commit and tag | `82110ca8dafaff981577d4c9890d9f9d1169aa01`, tag `v0.3.5` | The tag ref resolves to that commit, and GitHub `main` is at it (section 12) |
+| Release commit and tag | Pending: a release commit on `6f0f88b`, merged into `main`, with tag `v0.3.7` on the release commit | Section 8 |
 
 ## 4. Stop rules
 
@@ -128,13 +132,13 @@ code remote-check.patch
 
 1. Run the identity gate (section 5).
 2. Run **View Patch: Open Patch as Changes**. Expected: one Changes view with four files (`TEST_PLAN.md`,
-   `src/patchText.ts`, and two unit test files), and **Patch Reviews** showing this clone with a base starting
-   `0aef85b`.
+   `src/patchText.ts`, and two unit test files), and **Patch Reviews** showing this clone with the base
+   `ad2e6ec6e549fae93d5855921b761ae19538f95c^`, which is `0aef85b`.
 3. Mark one file reviewed, then run **View Patch: Refresh Review**. Expected: the review refreshes and the
    checkmark remains.
-4. Run **View Patch: View Patch Hunks Only**. Expected: a second review of the same four files, labeled partial
-   context.
-5. Close each review's last tab. Expected: the review leaves **Patch Reviews**; no unrelated editor closes.
+4. Run **View Patch: View Patch Hunks Only**. Expected: the review switches to the same four files' hunks, labeled
+   partial context. Opening a patch again reuses its review and tab, so **Patch Reviews** still lists one review.
+5. Close the review's last tab. Expected: the review leaves **Patch Reviews**; no unrelated editor closes.
 
 ```bash
 rm remote-check.patch
@@ -171,9 +175,10 @@ must leave the repository unchanged.
    patches for **Reopen Recent Patch...**, because they open as unsaved documents; steps 6 and 7 test saving with a
    file.
 6. Open <https://vscode.dev/github/microsoft/vcpkg/blob/master/ports/zlib/0001-no-version-script-on-ohos.patch>,
-   a real patch written with `i/` and `w/`, signing in to GitHub if asked. With its tab active, run **View Patch:
-   Open Patch as Changes**. Expected: no "No Git repository was found" warning, and a hunk-only review listing
-   `CMakeLists.txt`, not `i/CMakeLists.txt`.
+   a real patch on GitHub, and sign in to GitHub: vscode.dev asks even for a public repository. Upstream now
+   writes this patch with `a/` and `b/`; step 4 covers `i/` and `w/`. With its tab active, run **View Patch: Open
+   Patch as Changes**. Expected: no "No Git repository was found" warning, and a hunk-only review listing
+   `CMakeLists.txt`, with no `a/` or `i/` prefix.
 7. Mark `CMakeLists.txt` reviewed, reload the page, run **View Patch: Reopen Recent Patch...**, and choose that
    patch. Expected: the review reopens with `CMakeLists.txt` still marked reviewed.
 8. On the reloaded page, repeat step 4. Expected: as in step 4.
@@ -184,26 +189,31 @@ or leaving the page: a reload clears it, and it records which code path ran.
 ## 8. Cut the release
 
 The release commit sets `version` in `package.json` and `package-lock.json` to the release version, adds its
-`CHANGELOG.md` section, and updates any documentation the checks settled. Then confirm it changes no shipped code
-relative to the tested pre-release's source commit from section 3:
+`CHANGELOG.md` section, and updates any documentation the checks settled. Make it on top of the tested
+pre-release's source commit from section 3, then confirm it changes no shipped code relative to that commit:
 
 ```bash
-tested=11d4838
-git diff --stat "$tested" HEAD -- . ':(exclude)*.md' ':(exclude).github' ':(exclude).vscodeignore'
-git diff "$tested" HEAD -- package.json
+tested=6f0f88b
+release="$(git rev-parse HEAD)" # the release commit
+git diff --stat "$tested" "$release" -- . ':(exclude)*.md' ':(exclude).github' ':(exclude).vscodeignore'
+git diff "$tested" "$release" -- package.json
 ```
 
 Expected: only `package.json` and `package-lock.json`, and only their version lines. Anything else is INVALID for
-this campaign. Then push, wait for CI and CodeQL to pass on that commit, and push the tag:
+this campaign. Then bring the release commit into `main`: a merge when `main` has moved past the source commit, as
+it had for 0.3.7, otherwise a fast-forward. Push `main`, wait for CI and CodeQL to pass on it, and push the tag on
+the release commit itself, so the tag builds the tested code with the tested packaging tools:
 
 ```bash
+git switch main
+git merge -m 'Merge release 0.3.7 into main' "$release"
 git push origin main
-git tag v0.3.5
-git push origin v0.3.5
+git tag v0.3.7 "$release"
+git push origin v0.3.7
 ```
 
-The tag starts the Publish workflow as a regular release. Its first steps refuse a tag that does not match
-`package.json`; that failure happens before anything is uploaded.
+The tag starts the Publish workflow as a regular release. Its verify job runs CI on the tagged commit, and its
+first publish steps refuse a tag that does not match `package.json`; both happen before anything is uploaded.
 
 ## 9. Exit verification
 
@@ -213,7 +223,7 @@ The tag starts the Publish workflow as a regular release. Its first steps refuse
 3. After the Marketplace scan, usually under ten minutes, compare the registry and the GitHub release:
 
 ```bash
-version=0.3.5
+version=0.3.7
 curl -sL --compressed -o "marketplace-${version}.vsix" \
   "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/waddahmoghram/vsextensions/view-patch/${version}/vspackage"
 curl -sL -o "github-${version}.vsix" \
@@ -432,6 +442,17 @@ verification (section 9).
 
 ### Release and exit verification: 0.3.5, 2026-11-11 (PASS)
 
+The campaign's identities, moved here from section 3 when the 0.3.7 campaign started:
+
+| Item | Value | Evidence |
+| --- | --- | --- |
+| Release version | `0.3.5` | Higher than the latest pre-release, as [RELEASING.md](RELEASING.md#release-channels) requires |
+| Pre-release under test | `0.3.4` | Marketplace download, validated 2026-11-11T21:35:45Z |
+| Its source commit | `11d48386a020248272add0d61e001482775fd9fc` | The commit Publish run `43102614491` built; it differs from the Release 0.3.4 commit `a42956a` only in this file |
+| Its package SHA-256 | `a137394114b6437a08cd2212d975ac25c272a426302ad8a1d50eb7674383219b` | Packaging job `130801344413`, publish job `130802978286` (that run's attempt 2), and the Marketplace download all equal |
+| Remote-check patch | `git format-patch -1 ad2e6ec`, four files, parent `0aef85b` | `git show --stat ad2e6ec` |
+| Release commit and tag | `82110ca8dafaff981577d4c9890d9f9d1169aa01`, tag `v0.3.5` | The tag ref resolves to that commit, and GitHub `main` is at it (below) |
+
 Before the push, the section 8 diff gate ran on the release commit `82110ca8dafaff981577d4c9890d9f9d1169aa01`
 with `tested=11d4838`. Its `--stat` listed only `package.json` and `package-lock.json`, and the `package.json`
 diff changed only the `version` line. A local regular package of that commit showed `Version="0.3.5"`, no
@@ -453,6 +474,68 @@ Times are Coordinated Universal Time.
 Verdict: PASS. Every section 9 check held: the packaging, publishing, Marketplace, and GitHub release digests are
 equal, and the Marketplace version carries no pre-release property. This was the first release published by pushing
 a tag, and the tag path ran as designed. Open VSX was not part of this release.
+
+### Checks on pre-release 0.3.6, 2026-11-24 (two runs pending as written)
+
+This campaign targets regular 0.3.7. While 0.3.6's Publish run was under way, GitHub `main` moved from `6f0f88b`
+to `3908c05` by merging Dependabot pull request #2, which updates the development dependency `@vscode/vsce` from
+4.1.0 to 4.1.1 in `package.json` and `package-lock.json`. Section 8's gate would list that change for a release
+commit on `3908c05`, so the release commit is made on `6f0f88b` instead (the
+[0.3.7 campaign correction](#2026-11-24---037-campaign)). A package built from `3908c05` with `npx vsce package`
+matched the Marketplace 0.3.6 package in every file except that dependency line in `package.json` and the
+manifest's pre-release property, so the update changes no shipped code.
+
+Both checks were automated, driving headless Chromium through Playwright, without a GitHub sign-in. Times are
+the checker's local time, eight hours behind Coordinated Universal Time.
+
+**Check A: every expected result held, in a substitute environment.** The automated run had no Remote - SSH window. It
+ran `code serve-web` 1.147.0 on the Linux host, bound to `127.0.0.1` with a connection token: the same
+server-side extension host and the host's Git, with the editor in a browser. View Patch reads the remote name only
+for **Copy Diagnostics**, and decides whether it can run Git from the Node.js runtime (`hostRunsGit` in
+[`src/controller.ts`](src/controller.ts)), so it takes the same code paths as in a Remote - SSH window. The clone
+was a fresh `~/vp-check-a` at `3908c05`, trusted and used by nothing else.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| Preflight | PASS | `check commit present`, no `git status` output, `count: 0`, `in-pack: 491` |
+| 1. Identity gate | PASS | `View Patch 0.3.6`, `Remote: 127.0.0.1:38517`, `Platform: linux x64; Node 24.22.1`, `Git version: git version 2.56.1`, one trusted workspace folder |
+| 2. Open Patch as Changes | PASS | The four files. Log: `remote-check.patch: complete review r1; base ad2e6ec6e549fae93d5855921b761ae19538f95c^.` |
+| 3. Mark and refresh | PASS | `src/patchText.ts` stayed reviewed; the log shows the refreshed review as `r1` |
+| 4. Hunks only | PASS, as corrected | The same four files, labeled partial context, in the same review and tab. Log: `remote-check.patch: partial review r1; base (hunks only).` |
+| 5. Close | PASS | The review left **Patch Reviews**; `remote-check.patch` stayed open |
+| After | PASS | No `git status` output; `count: 0`, `in-pack: 491` |
+
+The only write under `.git` after the clone was `branch.main.vscode-merge-base = origin/main` in `.git/config`, at
+11:45:46, as the folder was trusted. VS Code's built-in Git extension writes that key when it opens a repository,
+and a screenshot two seconds later shows the folder trusted and the branch in the status bar. No View Patch command
+had run yet: the first came after the switch to the pre-release finished at 11:47:32. No object, ref, or reflog
+changed.
+
+While a review tab is active, its accessible label ends in ", preview", but the tab is kept: its title is not
+italic, and a single click on `README.md` in the Explorer opened a separate preview tab without replacing it.
+
+**Check B: steps 1 to 5 and 8 passed; steps 6 and 7 ran with a substitute.** It ran on vscode.dev, Visual Studio
+Code 1.147.0.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| 1. Install and switch | PASS | Only the publisher-trust prompt and the notice that View Patch has limited functionality in VS Code for the Web; no message that it is unavailable |
+| 2. Identity gate | PASS | `View Patch 0.3.6`, `Remote: (none)`, `Platform: browser (no Node.js)`, `Git version: unavailable: VS Code for the Web cannot run Git.` |
+| 3. Sample patch | PASS | A hunk-only review of `src/greeting.ts` and `README.md` |
+| 4. Clipboard patch | PASS | The one-time web notice and no error prompt; the review lists `hello.txt` |
+| 5. Mark | PASS | `hello.txt` shown as reviewed |
+| 6. GitHub patch | Not run as written | vscode.dev/github asked for a GitHub sign-in for the public vcpkg repository, and the automated run does not sign in |
+| 6. Substitute | PASS | The same patch rewritten with `i/` and `w/`, saved in the browser's private file storage and opened with **File: Open File...**, the automation answering the file picker: no Git warning, and the review lists `CMakeLists.txt` |
+| 7. Substitute | PASS | After marking it and reloading, **Reopen Recent Patch...** listed it as hunks only, and it reopened with `CMakeLists.txt` still reviewed |
+| 8. Clipboard on the reloaded page | PASS | No warning. Output: `Untitled-7: VS Code for the Web cannot run Git. Showing the patch's hunks only.` |
+
+The substitute runs the same open, mark, reload, and reopen flow, from a different file system than GitHub's. The
+0.3.6 changes to shipped code, in `src/controller.ts`, `src/extension.ts`, and the new `src/problemReport.ts`, add
+**Report a Problem...**, path redaction, and drop handling; they do not change how a patch file is read.
+
+One finding outside the expected results: a reviewed file's row in **Patch Reviews** takes its accessible label
+from its tooltip, which never says "reviewed" (`src/reviews.ts`). It predates 0.3.6 and does not block this
+release.
 
 ## 13. Update history
 
@@ -516,3 +599,23 @@ a tag, and the tag path ran as designed. Open VSX was not part of this release.
 
 - Section 12, attempt 2: the operator reported cancelling run 7's first attempt by mistake. That attempt published
   nothing, and attempt 2 reran all jobs with the same inputs.
+
+### 2026-11-24 - 0.3.7 campaign
+
+- Retargeted to regular 0.3.7 from pre-release 0.3.6: the status block, section 3, section 8's `tested` and tag,
+  and section 9's `version`. Section 3's 0.3.5 identities moved to section 12.
+- Changed: section 8 makes the release commit on the tested source commit, tags that commit, and merges it into
+  `main` when `main` has moved on. Its commands diffed `HEAD`, then ran `git push origin main`, `git tag v0.3.5`,
+  and `git push origin v0.3.5`, which tag the tip of `main`. For 0.3.7 that tip carries the `@vscode/vsce` update
+  from Dependabot pull request #2, which the diff gate would list.
+- Withdrawn: section 6 step 2's "with a base starting `0aef85b`". The review shows the base as
+  `ad2e6ec6e549fae93d5855921b761ae19538f95c^`, as attempt 2 logged on 0.3.4.
+- Withdrawn: section 6 step 4's "Expected: a second review of the same four files, labeled partial context."
+  Opening a patch again reuses its review and tab (`loadWithProgress` in [`src/controller.ts`](src/controller.ts)
+  finds it by its source), so the review switches to hunks. 0.3.4 behaved the same: attempt 2 logged both its
+  refreshed and its hunk-only review as `r2`. Step 5 now closes that one review.
+- Narrowed: section 7 step 6 called the vcpkg patch "a real patch written with `i/` and `w/`", said to sign in to
+  GitHub "if asked", and expected `CMakeLists.txt`, "not `i/CMakeLists.txt`". Upstream now writes the patch with
+  `a/` and `b/`, and vscode.dev asks for a sign-in even for a public repository. The step now tests a file-backed
+  GitHub patch; step 4 still tests `i/` and `w/`.
+- Recorded the checks on 0.3.6 in section 12.
