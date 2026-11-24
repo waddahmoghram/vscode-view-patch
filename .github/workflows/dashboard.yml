@@ -65,6 +65,7 @@ jobs:
         with:
           name: dashboard-metrics
           path: .dashboard/metrics-*.json
+          include-hidden-files: true # The metrics live inside the hidden .dashboard directory.
           if-no-files-found: error
           retention-days: 90
       - uses: actions/upload-pages-artifact@v5
