@@ -84,7 +84,8 @@ give a regular release a version higher than the latest pre-release for pre-rele
    ```
 
 1. The Publish workflow first calls the shared verification workflow, which builds the `.vsix` once. Publishing waits
-   for all Linux, macOS, Windows, oldest-supported-editor, and web tests, dependency auditing, and packaging to pass.
+   for all Linux, macOS, Windows, oldest-supported-editor, and web tests, dependency auditing, packaging, and a smoke
+   test of that `.vsix` as installed to pass.
    It then checks the tag against `package.json`, downloads that exact `.vsix`, checks its channel, and records its
    SHA-256 digest; the packaging job records the digest too, so the two can be compared. It publishes that file and
    attaches the same file to a GitHub release. Concurrent publishing runs are serialized.
@@ -106,14 +107,21 @@ preview and regular versions together.
 npm ci
 npm audit --include=dev
 npm test
-npx vsce package
+npx vsce package --out view-patch.vsix
 npx vsce ls
+npm run test:package
 ```
 
-On Linux without a display, run the tests as `xvfb-run -a npm test`. Tests include real trusted-editor sessions and
-an isolated editor launched in Restricted Mode without the usual test runner's trust bypass.
+On Linux without a display, run the tests as `xvfb-run -a npm test` and `xvfb-run -a npm run test:package`. Tests
+include real trusted-editor sessions and an isolated editor launched in Restricted Mode without the usual test
+runner's trust bypass.
 Set `VSCODE_TEST_VERSION=1.90.0` to repeat integration tests on the oldest supported editor.
 `npx vsce ls` lists the files that go into the package.
+`npm run test:package` is the check CI's `smoke` job runs on the package it built: it installs `view-patch.vsix`
+(or the path given after `--`) into a fresh extensions folder, checks that the installed copy activates at the
+package's version rather than this checkout, opens the sample, a complete-file review in a temporary repository
+that must stay unchanged, and a hunk-only review. It runs the compiled suite from `out/`, so `npm test` or
+`npm run compile` must come first. It is a desktop, local-window check only.
 
 The overrides in [`package.json`](./package.json) keep transitive development-tool dependencies on patched releases
 while their parent tools still request vulnerable versions. Keep [`package-lock.json`](./package-lock.json) in sync.
@@ -123,7 +131,8 @@ including the oldest supported editor.
 Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
 tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. The
 [regular release runbook](RELEASE_RUNBOOK.md) gives the exact steps, expected results, and record. Provider-backed
-address tests cover path handling but are not an end-to-end remote connection or web-session test.
+address tests cover path handling but are not an end-to-end remote connection or web-session test, and the
+installed-package smoke test uses a local window, not a remote extension host or vscode.dev.
 
 ## Quality dashboard
 
