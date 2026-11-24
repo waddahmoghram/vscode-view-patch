@@ -1,9 +1,10 @@
 name: Quality dashboard
 
 # Builds the quality dashboard with scripts/quality-dashboard.mjs every day, when run by hand, and after a CI or
-# Publish run on main or a release tag finishes. Each run adds a summary to its own page and keeps the built site as
-# an artifact. The deploy job publishes it to GitHub Pages only when the repository variable DASHBOARD_PAGES is
-# `true`; enable Pages with GitHub Actions as its source first (see RELEASING.md).
+# Publish run on main or a release tag finishes. Each run adds a summary to its own page, keeps the built site as
+# an artifact, and keeps its dated metrics snapshot for 90 days as the dashboard-metrics artifact, so no daily
+# statistics are committed to the repository. The deploy job publishes it to GitHub Pages only when the repository
+# variable DASHBOARD_PAGES is `true`; enable Pages with GitHub Actions as its source first (see RELEASING.md).
 on:
   schedule:
     - cron: '41 5 * * *'
@@ -38,10 +39,34 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # The newest metrics snapshot from an earlier UTC day, for the page's changes: three or four requests with
+      # this job's token, apart from the script's own budget. Without one the page says it has no previous snapshot.
+      - name: Download the previous metrics snapshot
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today="$(date -u +%F)"
+          run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=dashboard-metrics&per_page=100" \
+            --jq "[.artifacts[] | select(.expired | not) | select(.created_at[:10] < \"${today}\")]
+              | sort_by(.created_at) | last | .workflow_run.id // empty")"
+          if [ -z "${run_id}" ]; then
+            echo "No unexpired metrics snapshot from before ${today}."
+            exit 0
+          fi
+          gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" --name dashboard-metrics --dir .dashboard-history
+          ls .dashboard-history
       - name: Build the dashboard
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          DASHBOARD_HISTORY_DIR: .dashboard-history
         run: node scripts/quality-dashboard.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dashboard-metrics
+          path: .dashboard/metrics-*.json
+          if-no-files-found: error
+          retention-days: 90
       - uses: actions/upload-pages-artifact@v5
         with:
           path: .dashboard

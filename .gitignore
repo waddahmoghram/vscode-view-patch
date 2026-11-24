@@ -3,4 +3,5 @@ out/
 dist/
 .vscode-test/
 .dashboard/
+.dashboard-history/
 *.vsix

@@ -139,10 +139,24 @@ continuous integration (CI) or Publish run on `main` or a release tag finishes. 
   jobs, and the test counts that its logs report.
 - The digests that Publish run recorded, next to the Marketplace's own digest of the version it published; the
   Marketplace's latest version, channel, and install, download, and update counts; the Open VSX listing; and open
-  Dependabot pull requests.
+  Dependabot pull requests. A run that skipped the Open VSX job, as it does while `OPEN_VSX_PUBLISHING` is unset,
+  shows that job as skipped and compares the others. The package and Marketplace publish jobs, and an Open VSX job
+  that ran, must each succeed and print a digest; otherwise the digest rule cannot be evaluated, unless the digests
+  already disagree.
+- Freshness: when the page was generated and how old the latest CI, CodeQL, and Publish runs, the Marketplace
+  version, and the previous metrics snapshot were then. The page does not update itself; one generated more than
+  two days ago means the workflow has stopped.
+- The change in each aggregate number since the previous metrics snapshot: pass rates, re-runs, the median CI
+  duration, test counts, registry installs, downloads, and updates, and open Dependabot pull requests. A value that
+  either snapshot could not read is shown as unavailable with its reason, never as 0, and has no change.
 
-Every run adds a summary to its own run page and keeps the site for a day as its `github-pages` artifact. To
-publish the site with GitHub Pages:
+Every run adds a summary to its own run page and keeps the site for a day as its `github-pages` artifact. It also
+writes `metrics-YYYY-MM-DD.json`, named for the run's UTC day, with only those aggregate numbers, the readiness
+verdict, the Marketplace version, and a reason for each value it could not read, and keeps it for 90 days as its
+`dashboard-metrics` artifact, so no daily statistics are committed to the repository. Before building, the
+workflow downloads the newest unexpired `dashboard-metrics` artifact from an earlier UTC day with the job's own
+token, three or four requests outside the script's budget, and the page compares with it. When that step finds or
+downloads nothing, the page says there is no previous snapshot. To publish the site with GitHub Pages:
 
 1. In the repository's **Settings** > **Pages**, set **Source** to **GitHub Actions**.
 1. In **Settings** > **Secrets and variables** > **Actions** > **Variables**, add the repository variable
@@ -161,3 +175,14 @@ Open `.dashboard/index.html`; `.dashboard/data.json` holds the same data. Withou
 six GitHub requests, well under the limit of 60 an hour for unauthenticated use, and shows the values that only
 job logs hold, the test counts and digests, as unavailable. Set `GITHUB_TOKEN` to a token that can read this
 repository's Actions to include them, and `DASHBOARD_OUT` to write somewhere else.
+
+To compare with earlier snapshots locally, download them into one folder and pass it with `--history-dir` (or
+`DASHBOARD_HISTORY_DIR`). The script reads `metrics-YYYY-MM-DD.json` files in that folder and its subfolders,
+makes no requests for them, skips and lists any file it cannot use, and compares with the newest one from an
+earlier UTC day. For example, with the GitHub command-line tool (`gh`), where `<run-id>` is an earlier Quality
+dashboard run:
+
+```bash
+gh run download <run-id> --name dashboard-metrics --dir .dashboard-history/<run-id>
+node scripts/quality-dashboard.mjs --history-dir .dashboard-history
+```

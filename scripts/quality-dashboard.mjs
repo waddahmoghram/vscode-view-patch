@@ -1,18 +1,22 @@
 // Builds a quality dashboard for View Patch from GitHub Actions, release, and registry data.
 //
-//   node scripts/quality-dashboard.mjs
+//   node scripts/quality-dashboard.mjs [--history-dir <folder>]
 //
 // Environment: GITHUB_REPOSITORY (owner/name, default waddahmoghram/vscode-view-patch), GITHUB_TOKEN (optional),
-// DASHBOARD_OUT (output folder, default .dashboard), and GITHUB_STEP_SUMMARY (set by GitHub Actions; a Markdown
-// summary is appended to it). Writes <out>/index.html, a self-contained page without scripts, and <out>/data.json.
+// DASHBOARD_OUT (output folder, default .dashboard), DASHBOARD_HISTORY_DIR (same as --history-dir), and
+// GITHUB_STEP_SUMMARY (set by GitHub Actions; a Markdown summary is appended to it). Writes <out>/index.html, a
+// self-contained page without scripts, <out>/data.json, and <out>/metrics-YYYY-MM-DD.json, a compact snapshot of
+// the aggregate numbers. Snapshots from earlier days found in the history folder or its subfolders give the page
+// its changes since the previous snapshot; reading them makes no requests.
 //
 // Without a token the run makes six GitHub requests, far below the unauthenticated limit of 60 an hour, and the
 // values that only job logs hold (test counts and package digests) are reported as unavailable. A source that
 // fails becomes "unavailable: <reason>" instead of stopping the run.
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -108,24 +112,74 @@ export function testCountsFromLog(jobName, text) {
 }
 
 /**
+ * The Publish run's jobs that print a package digest, each with the parseDigestLines field it prints. They are
+ * matched by their exact names, so that no other job, such as a smoke test of the installed package, is read for a
+ * digest; CI's package job runs in Publish as "verify / package". Only the Open VSX job may be left out, because it
+ * runs only when the repository enables it.
+ */
+const DIGEST_JOBS = [
+    { key: 'packaged', source: 'CI package job', names: ['verify / package', 'package'], required: true },
+    { key: 'publishing', source: 'Marketplace publish job', names: ['publish'], required: true },
+    { key: 'openVsx', source: 'Open VSX publish job', names: ['open-vsx'], required: false },
+];
+
+async function readDigestTarget({ key, required }, job, readLog) {
+    if (!job) {
+        return { state: 'missing', detail: 'not in this run' };
+    }
+    if (job.conclusion === 'skipped') {
+        return { state: 'skipped', detail: required ? 'skipped' : 'skipped, not enabled for this run' };
+    }
+    const succeeded = job.conclusion === 'success';
+    const state = succeeded ? 'unverified' : 'failed';
+    const outcome = succeeded ? '' : `concluded ${job.conclusion ?? job.status}, `;
+    let found;
+    try {
+        found = parseDigestLines(await readLog(job.id));
+    } catch (error) {
+        return { state, detail: `${outcome}log unavailable (${error?.message ?? error})` };
+    }
+    if (!found[key]) {
+        return { state, detail: `${outcome}printed no digest`, found };
+    }
+    return { state: succeeded ? 'recorded' : 'failed', detail: `${outcome}digest recorded`, found };
+}
+
+/**
+ * Reads the digest that each of a Publish run's digest jobs printed; readLog(jobId) returns a job's log. A skipped
+ * job never ran, so its log is not read. Returns the parseDigestLines fields, each from the job that prints it, and
+ * each job's state: recorded, skipped, missing, failed (concluded other than success), or unverified (succeeded
+ * without a readable digest).
+ */
+export async function readDigestTargets(jobs, readLog) {
+    const recorded = { targets: [] };
+    for (const target of DIGEST_JOBS) {
+        const job = jobs.find(entry => target.names.includes(entry.name));
+        const { found, ...result } = await readDigestTarget(target, job, readLog);
+        if (found?.[target.key]) {
+            recorded[target.key] = found[target.key];
+        }
+        if (target.key === 'publishing' && found?.publishedVersion) {
+            recorded.publishedVersion = found.publishedVersion;
+        }
+        recorded.targets.push({ key: target.key, source: target.source, required: target.required, job, ...result });
+    }
+    return recorded;
+}
+
+const describeTarget = target => `${target.source}: ${target.detail}`;
+
+/**
  * Compares the digests that a Publish run recorded, plus the Marketplace's own digest when the Marketplace's latest
- * version is the one that run published. `recorded` is { available, reason } or the parseDigestLines result.
- * Status: match, mismatch, not recorded (fewer than two digests to compare), or unavailable.
+ * version is the one that run published. `recorded` is { available, reason } or the readDigestTargets result.
+ * Status: match, mismatch, not recorded (fewer than two digests to compare), or unavailable: no job logs, or a job
+ * that did not succeed with a digest, unless it is an optional job that the run skipped or lacks.
  */
 export function digestVerdict(recorded, marketplace) {
     if (!recorded?.available) {
         return { status: 'unavailable', detail: recorded?.reason ?? 'no job logs', digests: [] };
     }
-    const digests = [];
-    if (recorded.packaged) {
-        digests.push({ source: 'CI package job', ...recorded.packaged });
-    }
-    if (recorded.publishing) {
-        digests.push({ source: 'Marketplace publish job', ...recorded.publishing });
-    }
-    if (recorded.openVsx) {
-        digests.push({ source: 'Open VSX publish job', ...recorded.openVsx });
-    }
+    const digests = DIGEST_JOBS.flatMap(({ key, source }) => (recorded[key] ? [{ source, ...recorded[key] }] : []));
     if (marketplace?.available && marketplace.vsixSha256 && recorded.publishedVersion === marketplace.version) {
         digests.push({
             source: `Marketplace download of ${marketplace.version}`,
@@ -133,25 +187,29 @@ export function digestVerdict(recorded, marketplace) {
             sha256: marketplace.vsixSha256,
         });
     }
-    if (digests.length < 2) {
-        const detail = digests.length === 0
-            ? 'the run printed no package digest; runs before same-package publishing did not'
-            : `only one digest to compare, from the ${digests[0].source}`;
-        return { status: 'not recorded', detail, digests };
-    }
+    const targets = recorded.targets ?? [];
+    const result = (status, detail) => ({ status, detail, digests, targets });
     const differing = digests.filter(digest => digest.sha256 !== digests[0].sha256);
     if (differing.length > 0) {
-        return {
-            status: 'mismatch',
-            detail: `${differing.map(digest => digest.source).join(', ')}: digest differs from the ${digests[0].source}`,
-            digests,
-        };
+        return result('mismatch',
+            `${differing.map(digest => digest.source).join(', ')}: digest differs from the ${digests[0].source}`);
     }
     const channels = [...new Set(digests.flatMap(digest => digest.channel ?? []))];
     if (channels.length > 1) {
-        return { status: 'mismatch', detail: `the digests agree but the channels differ: ${channels.join(' and ')}`, digests };
+        return result('mismatch', `the digests agree but the channels differ: ${channels.join(' and ')}`);
     }
-    return { status: 'match', detail: `${digests.length} digests agree`, digests };
+    const leftOut = target => !target.required && (target.state === 'skipped' || target.state === 'missing');
+    const unverified = targets.filter(target => target.state !== 'recorded' && !leftOut(target));
+    if (unverified.length > 0) {
+        return result('unavailable', unverified.map(describeTarget).join('; '));
+    }
+    if (digests.length < 2) {
+        return result('not recorded', digests.length === 0
+            ? 'the run printed no package digest; runs before same-package publishing did not'
+            : `only one digest to compare, from the ${digests[0].source}`);
+    }
+    const notes = targets.filter(leftOut).map(describeTarget);
+    return result('match', [`${digests.length} digests agree`, ...notes].join('; '));
 }
 
 function median(values) {
@@ -163,7 +221,11 @@ function median(values) {
     return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-const elapsed = (start, end) => (start && end ? Date.parse(end) - Date.parse(start) : undefined);
+// Undefined unless both times are valid and in order; GitHub gives a skipped job a completion before its start.
+function elapsed(start, end) {
+    const ms = Date.parse(end) - Date.parse(start);
+    return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
+}
 
 /**
  * Summarizes a workflow's runs, newest first. CI and CodeQL keep runs on main that a pull request did not start.
@@ -337,6 +399,244 @@ export function readiness(report) {
     return { verdict, rules };
 }
 
+export const SNAPSHOT_KIND = 'view-patch-dashboard-metrics';
+export const SNAPSHOT_FILE = /^metrics-(\d{4}-\d\d-\d\d)\.json$/;
+// The workflow runs daily, so a page or snapshot older than this means it has stopped.
+export const STALE_AFTER_MS = 2 * DAY_MS;
+
+// Reads one number from a collected source, or the reason it is unknown; never a 0 for an unknown value.
+function measure(source, pick, missing) {
+    if (!source?.available) {
+        return { reason: source?.reason ?? 'not collected' };
+    }
+    const value = pick(source);
+    return Number.isFinite(value) ? { value } : { reason: typeof missing === 'function' ? missing(source) : missing };
+}
+
+const rounded = value => (Number.isFinite(value) ? Math.round(value * 10_000) / 10_000 : value);
+const firstCount = (report, pick) => report.testCounts?.jobs?.map(pick).find(Number.isFinite);
+
+/** The aggregate public numbers each dated snapshot keeps, in display order. */
+export const METRICS = [
+    ['ciPassRate', 'CI pass rate on main', 'rate',
+        report => measure(report.workflows?.ci, workflow => rounded(workflow.passRate), 'no decisive CI run')],
+    ['ciReruns', 'CI re-runs', 'count',
+        report => measure(report.workflows?.ci, workflow => workflow.reruns, 'not collected')],
+    ['ciMedianDurationMs', 'CI median successful duration', 'duration',
+        report => measure(report.workflows?.ci, workflow => workflow.medianDurationMs, 'no successful CI run')],
+    ['codeqlPassRate', 'CodeQL pass rate on main', 'rate',
+        report => measure(report.workflows?.codeql, workflow => rounded(workflow.passRate), 'no decisive CodeQL run')],
+    ['publishPassRate', 'Publish pass rate', 'rate',
+        report => measure(report.workflows?.publish, workflow => rounded(workflow.passRate), 'no decisive Publish run')],
+    ['unitTests', 'Unit tests in the latest CI run', 'count',
+        report => measure(report.testCounts, () => firstCount(report, job => job.unit?.[0]?.tests), 'no unit summary')],
+    ['editorTestsPassing', 'Editor tests passing', 'count',
+        report => measure(report.testCounts, () => firstCount(report, job => job.editor?.passing), 'no editor summary')],
+    ['webTestsPassing', 'Web tests passing', 'count',
+        report => measure(report.testCounts, () => firstCount(report, job => job.web?.passing), 'no web summary')],
+    ['marketplaceInstalls', 'Marketplace installs', 'count',
+        report => measure(report.marketplace, marketplace => marketplace.installs, 'no install statistic')],
+    ['marketplaceDownloads', 'Marketplace downloads', 'count',
+        report => measure(report.marketplace, marketplace => marketplace.downloads, 'no download statistic')],
+    ['marketplaceUpdates', 'Marketplace updates', 'count',
+        report => measure(report.marketplace, marketplace => marketplace.updates, 'no update statistic')],
+    ['openVsxDownloads', 'Open VSX downloads', 'count',
+        report => measure(report.openVsx, openVsx => (openVsx.listed ? openVsx.downloads : undefined),
+            openVsx => (openVsx.listed ? 'no download count' : 'not listed on Open VSX'))],
+    ['dependabotOpen', 'Open Dependabot pull requests', 'count',
+        report => measure(report.dependabot, dependabot => dependabot.pulls?.length, 'not collected')],
+].map(([key, label, kind, read]) => ({ key, label, kind, read }));
+
+/** The UTC date of a timestamp, as YYYY-MM-DD. */
+export function snapshotDate(iso) {
+    const time = Date.parse(iso);
+    if (!Number.isFinite(time)) {
+        throw new Error(`"${iso}" is not a valid time`);
+    }
+    return new Date(time).toISOString().slice(0, 10);
+}
+
+export const snapshotFileName = iso => `metrics-${snapshotDate(iso)}.json`;
+
+/**
+ * The compact snapshot written next to data.json: aggregate public numbers only, with null and a reason in
+ * `unavailable` for each value the run could not read.
+ */
+export function metricsSnapshot(report) {
+    const metrics = {};
+    const unavailable = {};
+    for (const { key, read } of METRICS) {
+        const { value, reason } = read(report);
+        metrics[key] = value ?? null;
+        if (value === undefined) {
+            unavailable[key] = reason;
+        }
+    }
+    return {
+        kind: SNAPSHOT_KIND,
+        schemaVersion: 1,
+        date: snapshotDate(report.generatedAt),
+        generatedAt: report.generatedAt,
+        repository: report.repository,
+        readiness: report.readiness?.verdict ?? null,
+        marketplaceVersion: report.marketplace?.available ? report.marketplace.version ?? null : null,
+        metrics,
+        unavailable,
+    };
+}
+
+/** A snapshot file's contents, checked; throws with the reason a file cannot be used. */
+export function parseSnapshot(text, fileName) {
+    let snapshot;
+    try {
+        snapshot = JSON.parse(text);
+    } catch {
+        throw new Error('not valid JSON');
+    }
+    if (snapshot?.kind !== SNAPSHOT_KIND || snapshot.schemaVersion !== 1) {
+        throw new Error(`not a version 1 ${SNAPSHOT_KIND} snapshot`);
+    }
+    if (!Number.isFinite(Date.parse(snapshot.generatedAt)) || snapshot.date !== snapshotDate(snapshot.generatedAt)) {
+        throw new Error('its date and generation time disagree');
+    }
+    if (fileName && SNAPSHOT_FILE.exec(path.basename(fileName))?.[1] !== snapshot.date) {
+        throw new Error(`its date ${snapshot.date} does not match its file name`);
+    }
+    if (typeof snapshot.metrics !== 'object' || snapshot.metrics === null) {
+        throw new Error('it has no metrics');
+    }
+    return snapshot;
+}
+
+/**
+ * Snapshots in a folder and its subfolders, where `gh run download` puts each artifact; undefined without a
+ * folder. A missing folder holds no snapshots, and a file that cannot be used is listed with its reason.
+ */
+export function readHistory(dir) {
+    if (!dir) {
+        return undefined;
+    }
+    let names;
+    try {
+        names = readdirSync(dir, { recursive: true }).map(String);
+    } catch (error) {
+        return error?.code === 'ENOENT'
+            ? { available: true, snapshots: [], skipped: [] }
+            : { available: false, reason: `cannot read ${dir}: ${error?.message ?? error}` };
+    }
+    const snapshots = [];
+    const skipped = [];
+    for (const name of names.filter(entry => SNAPSHOT_FILE.test(path.basename(entry))).sort()) {
+        try {
+            snapshots.push(parseSnapshot(readFileSync(path.join(dir, name), 'utf8'), name));
+        } catch (error) {
+            skipped.push({ file: name, reason: error?.message ?? String(error) });
+        }
+    }
+    return { available: true, snapshots, skipped };
+}
+
+const finite = value => (Number.isFinite(value) ? value : null);
+
+/** Each metric now, in the previous snapshot, and the change; the change is null unless both values are known. */
+export function metricDeltas(current, previous) {
+    return METRICS.map(({ key, label, kind }) => {
+        const now = finite(current.metrics?.[key]);
+        const before = previous ? finite(previous.metrics?.[key]) : null;
+        let previousReason;
+        if (!previous) {
+            previousReason = 'no previous snapshot';
+        } else if (before === null) {
+            previousReason = previous.unavailable?.[key]
+                ?? (previous.metrics && Object.hasOwn(previous.metrics, key) ? 'not collected' : 'not in that snapshot');
+        }
+        return {
+            key,
+            label,
+            kind,
+            current: now,
+            currentReason: now === null ? current.unavailable?.[key] ?? 'not collected' : undefined,
+            previous: before,
+            previousReason,
+            delta: now !== null && before !== null ? rounded(now - before) : null,
+        };
+    });
+}
+
+/**
+ * The change since the newest snapshot of this repository from an earlier UTC day. Several runs a day each write
+ * that day's snapshot, so only an earlier day counts as previous.
+ */
+export function trend(current, history) {
+    const base = !history
+        ? { available: false, reason: 'no history folder was given', snapshotsRead: 0, skipped: [] }
+        : !history.available
+            ? { available: false, reason: history.reason, snapshotsRead: 0, skipped: [] }
+            : { available: true, snapshotsRead: history.snapshots.length, skipped: history.skipped };
+    const previous = (history?.snapshots ?? [])
+        .filter(snapshot => snapshot.repository === current.repository && snapshot.date < current.date)
+        .sort((a, b) => Date.parse(b.generatedAt) - Date.parse(a.generatedAt))[0];
+    return {
+        ...base,
+        previous: previous && {
+            date: previous.date,
+            generatedAt: previous.generatedAt,
+            readiness: previous.readiness,
+            marketplaceVersion: previous.marketplaceVersion,
+        },
+        rows: metricDeltas(current, previous),
+    };
+}
+
+/** Milliseconds from a time to now, or undefined when the time is missing or invalid. */
+export function ageOf(iso, now) {
+    const time = Date.parse(iso);
+    return Number.isFinite(time) ? Math.max(0, now.getTime() - time) : undefined;
+}
+
+export function formatAge(ms) {
+    if (!Number.isFinite(ms)) {
+        return '—';
+    }
+    const hours = Math.floor(ms / 3_600_000);
+    if (hours < 1) {
+        return 'under an hour';
+    }
+    if (hours < 48) {
+        return `${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+    return `${Math.floor(ms / DAY_MS)} days`;
+}
+
+const latestTime = (workflow, name) => (!workflow?.available
+    ? { reason: workflow?.reason ?? 'not collected' }
+    : workflow.latest ? { at: workflow.latest.startedAt } : { reason: `no completed ${name} run` });
+
+/**
+ * How old the page and each source are at `now`, by default when the page was generated. The page itself is
+ * stale once it is older than STALE_AFTER_MS.
+ */
+export function freshness(report, now = new Date(report.generatedAt)) {
+    const sources = [
+        ['This dashboard', { at: report.generatedAt }],
+        ['Latest completed CI run on main', latestTime(report.workflows?.ci, 'CI')],
+        ['Latest completed CodeQL run on main', latestTime(report.workflows?.codeql, 'CodeQL')],
+        ['Latest completed Publish run', latestTime(report.workflows?.publish, 'Publish')],
+        ['Marketplace version published', report.marketplace?.available
+            ? report.marketplace.lastUpdated ? { at: report.marketplace.lastUpdated } : { reason: 'no update time' }
+            : { reason: report.marketplace?.reason ?? 'not collected' }],
+        ['Previous metrics snapshot', report.trend?.previous
+            ? { at: report.trend.previous.generatedAt }
+            : { reason: report.trend?.available === false ? report.trend.reason : 'no snapshot from an earlier day' }],
+    ];
+    const rows = sources.map(([label, { at, reason }]) => {
+        const ageMs = ageOf(at, now);
+        return { label, at, ageMs, reason: ageMs === undefined ? reason ?? 'no valid time' : undefined };
+    });
+    const ageMs = rows[0].ageMs;
+    return { ageMs, stale: ageMs === undefined || ageMs > STALE_AFTER_MS, rows };
+}
+
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 export function escapeHtml(value) {
@@ -466,6 +766,16 @@ started ${escapeHtml(formatTime(run.startedAt))}.</p>`
         ? table('Recorded package digests', ['Source', 'Channel', 'SHA-256'], digests.digests.map(digest => [
             escapeHtml(digest.source), escapeHtml(digest.channel ?? '—'), `<code class="digest">${escapeHtml(digest.sha256)}</code>`]))
         : '';
+    const targetTable = digests.targets?.length > 0
+        ? table('Publish run jobs that record the package digest', ['Digest source', 'Job', 'Result', 'Digest',
+            'Duration'], digests.targets.map(target => [
+            escapeHtml(target.source),
+            target.job ? link(target.job.name, target.job.url) : '—',
+            target.job ? badge(target.job.conclusion ?? target.job.status) : '—',
+            escapeHtml(target.detail),
+            escapeHtml(formatDuration(target.job?.durationMs)),
+        ]))
+        : '';
     const marketplace = report.marketplace;
     const openVsx = report.openVsx;
     const registries = [
@@ -490,6 +800,7 @@ started ${escapeHtml(formatTime(run.startedAt))}.</p>`
 ${publish}
 <p>Package digests: ${badge(digests.status)} ${escapeHtml(digests.detail)}</p>
 ${digestTable}
+${targetTable}
 ${table('Registries', ['Registry', 'Latest version', 'Channel', 'Installs', 'Downloads', 'Updates', 'Last updated'],
         registries)}
 ${local}
@@ -508,6 +819,70 @@ function dependencySection({ dependabot }) {
     return `<section aria-labelledby="dependencies">
 <h2 id="dependencies">Dependency updates</h2>
 ${body}
+</section>`;
+}
+
+/** A metric value as text: a percentage, a duration, or a count. */
+export function formatMetric(kind, value) {
+    if (!Number.isFinite(value)) {
+        return '—';
+    }
+    return kind === 'rate' ? `${Math.round(value * 100)}%` : kind === 'duration' ? formatDuration(value) : formatCount(value);
+}
+
+/** A change between two known values; zero is "no change", never a stand-in for an unknown value. */
+export function formatDelta(kind, delta) {
+    if (!Number.isFinite(delta)) {
+        return '—';
+    }
+    if (delta === 0) {
+        return 'no change';
+    }
+    const sign = delta > 0 ? '+' : '-';
+    const size = Math.abs(delta);
+    if (kind === 'rate') {
+        return `${sign}${(size * 100).toFixed(1)} points`;
+    }
+    return `${sign}${kind === 'duration' ? formatDuration(size) : formatCount(size)}`;
+}
+
+function freshnessSection(report) {
+    const rows = freshness(report).rows.map(row => [escapeHtml(row.label),
+        row.ageMs === undefined ? unavailable(row.reason) : escapeHtml(formatTime(row.at)),
+        row.ageMs === undefined ? '—' : escapeHtml(formatAge(row.ageMs))]);
+    return `<section aria-labelledby="freshness">
+<h2 id="freshness">Freshness</h2>
+<p>This page does not update itself. A new one is built at least daily, so if it was generated more than
+${STALE_AFTER_MS / DAY_MS} days before you read it, the workflow has stopped and every value below is stale.</p>
+${table('Ages when this page was generated', ['Source', 'Time', 'Age'], rows)}
+</section>`;
+}
+
+function trendSection({ trend: summary }) {
+    if (!summary) {
+        return '';
+    }
+    const cellOf = (row, side) => (row[side] === null
+        ? unavailable(row[`${side}Reason`])
+        : escapeHtml(formatMetric(row.kind, row[side])));
+    const rows = summary.rows.map(row => [escapeHtml(row.label), cellOf(row, 'current'), cellOf(row, 'previous'),
+        escapeHtml(formatDelta(row.kind, row.delta))]);
+    const previous = summary.previous;
+    const source = !summary.available
+        ? `<p>Previous snapshots: ${unavailable(summary.reason)}</p>`
+        : `<p>${summary.snapshotsRead} snapshot(s) read; ${previous
+            ? `comparing with the one from ${escapeHtml(previous.date)}, generated `
+                + `${escapeHtml(formatTime(previous.generatedAt))}.`
+            : 'none is from an earlier day.'}</p>`;
+    const skipped = summary.skipped.length > 0
+        ? `<p>Skipped: ${summary.skipped.map(entry => `<code>${escapeHtml(entry.file)}</code> (${escapeHtml(entry.reason)})`)
+            .join(', ')}.</p>`
+        : '';
+    return `<section aria-labelledby="trend">
+<h2 id="trend">Change since the previous snapshot</h2>
+${source}
+${skipped}
+${table('Metrics now and in the previous snapshot', ['Metric', 'Now', 'Previous', 'Change'], rows)}
 </section>`;
 }
 
@@ -581,9 +956,11 @@ ${report.githubRequests} GitHub API requests.</p>
 </header>
 <main>
 ${readinessSection(report)}
+${freshnessSection(report)}
 ${workflowSection(report)}
 ${releaseSection(report)}
 ${dependencySection(report)}
+${trendSection(report)}
 ${historySection(report)}
 <section aria-labelledby="method">
 <h2 id="method">How this page is computed</h2>
@@ -594,9 +971,15 @@ runs are left out. A re-run is a run whose latest attempt is not its first, a si
 infrastructure.</li>
 <li>Package digests come from the latest successful Publish run, or the latest completed one when none succeeded.
 The CI package job, each publishing job, and the Marketplace's download of the version that run published must
-all agree.</li>
+all agree. The Open VSX job runs only when it is enabled; a run that skipped it shows it as skipped and leaves it
+out. Every other job, and an Open VSX job that ran, must succeed and print its digest, or the result is
+unavailable unless the digests already disagree. A duration that a job's or run's times cannot give, such as a
+skipped job's, is unavailable: it is shown as — and left out of medians.</li>
 <li>Test counts are the runners' own summaries in the latest CI run's job logs on ${repository}.</li>
 <li>Registry figures are as the Visual Studio Marketplace and Open VSX report them.</li>
+<li>Each build also writes <code>metrics-YYYY-MM-DD.json</code>, a snapshot of the aggregate numbers above, named
+for its UTC day. Changes compare with the newest snapshot from an earlier day; a value that either snapshot could
+not read is shown as unavailable and has no change, never 0.</li>
 </ul>
 </section>
 </main>
@@ -655,12 +1038,35 @@ export function renderMarkdown(report) {
         '| --- | --- |',
         ...WORKFLOWS.map(({ id, name }) => `| ${name} | ${cell(workflowText(report.workflows[id]))} |`),
         `| Package digests | ${cell(`${report.digests.status}: ${report.digests.detail}`)} |`,
+        `| Digest jobs | ${cell(report.digests.targets?.map(describeTarget).join('; ') || undefined)} |`,
         `| Test counts | ${cell(tests)} |`,
         `| Marketplace | ${cell(registry)} |`,
         `| Open VSX | ${cell(openVsxText)} |`,
         `| Dependabot pull requests | ${cell(pulls)} |`,
         '',
+        ...trendMarkdown(report.trend),
     ].join('\n');
+}
+
+function trendMarkdown(summary) {
+    if (!summary) {
+        return [];
+    }
+    const value = (row, side) => (row[side] === null
+        ? `unavailable: ${row[`${side}Reason`]}`
+        : formatMetric(row.kind, row[side]));
+    const since = summary.previous
+        ? `Change since the snapshot of ${summary.previous.date}`
+        : `No snapshot from an earlier day (${summary.available ? `${summary.snapshotsRead} read` : summary.reason})`;
+    return [
+        `**${since}**`,
+        '',
+        '| Metric | Now | Previous | Change |',
+        '| --- | --- | --- | --- |',
+        ...summary.rows.map(row => `| ${cell(row.label)} | ${cell(value(row, 'current'))} | `
+            + `${cell(value(row, 'previous'))} | ${cell(formatDelta(row.kind, row.delta))} |`),
+        '',
+    ];
 }
 
 function gitHubClient({ apiUrl, token, fetchImpl, budget }) {
@@ -724,6 +1130,7 @@ async function registryJson(fetchImpl, url, init = {}) {
 /** Collects every source into one report; GitHub requests stay within REQUEST_BUDGET. */
 export async function collect({
     repository, token, now = new Date(), fetch: fetchImpl = globalThis.fetch, apiUrl = 'https://api.github.com',
+    history,
 }) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) {
         throw new Error(`GITHUB_REPOSITORY must look like owner/name, not "${repository}"`);
@@ -790,11 +1197,7 @@ export async function collect({
         if (!token || !publishRun.available) {
             throw new Error(token ? publishRun.reason : needsToken);
         }
-        const logs = [];
-        for (const job of publishRun.jobs.filter(entry => /(?:^|\/ )(?:package|publish|open-vsx)$/.test(entry.name))) {
-            logs.push(await github.text(`${base}/actions/jobs/${job.id}/logs`));
-        }
-        return parseDigestLines(logs.join('\n'));
+        return readDigestTargets(publishRun.jobs, id => github.text(`${base}/actions/jobs/${id}/logs`));
     });
     const dependabot = await attempt(async () => ({
         pulls: dependabotPulls(await github.json(`${base}/pulls?state=open&per_page=100`), now),
@@ -822,20 +1225,25 @@ export async function collect({
         openVsx,
         dependabot,
     };
-    return { ...report, readiness: readiness(report) };
+    const complete = { ...report, readiness: readiness(report) };
+    return { ...complete, trend: trend(metricsSnapshot(complete), history) };
 }
 
 async function main() {
+    const { values } = parseArgs({ options: { 'history-dir': { type: 'string' } } });
     const token = process.env.GITHUB_TOKEN || undefined;
     const out = path.resolve(process.env.DASHBOARD_OUT || '.dashboard');
     const report = await collect({
         repository: process.env.GITHUB_REPOSITORY || 'waddahmoghram/vscode-view-patch',
         token,
         apiUrl: process.env.GITHUB_API_URL || undefined,
+        history: readHistory(values['history-dir'] || process.env.DASHBOARD_HISTORY_DIR || undefined),
     });
+    const snapshotName = snapshotFileName(report.generatedAt);
     mkdirSync(out, { recursive: true });
     writeFileSync(path.join(out, 'index.html'), renderHtml(report));
     writeFileSync(path.join(out, 'data.json'), `${JSON.stringify(report, null, 2)}\n`);
+    writeFileSync(path.join(out, snapshotName), `${JSON.stringify(metricsSnapshot(report))}\n`);
     if (process.env.GITHUB_STEP_SUMMARY) {
         appendFileSync(process.env.GITHUB_STEP_SUMMARY, renderMarkdown(report));
     }
@@ -844,7 +1252,10 @@ async function main() {
         console.log(`  ${rule.status.padEnd(7)} ${rule.text}: ${rule.detail}`);
     }
     console.log(`${report.githubRequests} GitHub requests${token ? '' : ' without a token'}; wrote `
-        + `${path.join(out, 'index.html')} and data.json.`);
+        + `${path.join(out, 'index.html')}, data.json, and ${snapshotName}.`);
+    console.log(report.trend.previous
+        ? `Compared with the metrics snapshot of ${report.trend.previous.date}.`
+        : `No metrics snapshot from an earlier day: ${report.trend.reason ?? `${report.trend.snapshotsRead} read`}.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
