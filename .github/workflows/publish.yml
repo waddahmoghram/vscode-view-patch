@@ -56,6 +56,7 @@ jobs:
         with:
           name: view-patch-vsix
       - name: Check the package's channel and record its digest
+        id: package
         run: |
           manifest="$(unzip -p view-patch.vsix extension.vsixmanifest)"
           if grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"' <<< "${manifest}"; then
@@ -70,7 +71,16 @@ jobs:
             exit 1
           fi
           digest="$(sha256sum view-patch.vsix | cut -d ' ' -f 1)"
+          echo "sha256=${digest}" >> "${GITHUB_OUTPUT}"
           echo "Publishing view-patch.vsix (${packaged}), SHA-256 ${digest}" | tee -a "${GITHUB_STEP_SUMMARY}"
+      # Before publishing, so a version without a CHANGELOG.md section stops the run with nothing uploaded.
+      - name: Write the release notes from CHANGELOG.md
+        if: github.event_name == 'push'
+        env:
+          PACKAGE_SHA256: ${{ steps.package.outputs.sha256 }}
+        run: >-
+          node scripts/release-notes.mjs --tag "${GITHUB_REF_NAME}" --sha256 "${PACKAGE_SHA256}"
+          > "${RUNNER_TEMP}/release-notes.md"
       - name: Publish to the Visual Studio Marketplace
         run: npx vsce publish --oidc ${PRE_RELEASE_FLAG:+"$PRE_RELEASE_FLAG"} --packagePath view-patch.vsix
       - name: Create the GitHub release
@@ -80,7 +90,7 @@ jobs:
         run: >-
           gh release create "${GITHUB_REF_NAME}" view-patch.vsix
           --title "${GITHUB_REF_NAME}"
-          --notes "See CHANGELOG.md for what changed."
+          --notes-file "${RUNNER_TEMP}/release-notes.md"
 
   # A separate job, so a failed Open VSX upload can be re-run without publishing to the Marketplace again. The
   # package carries its pre-release mark, which Open VSX reads; ovsx ignores --pre-release for a built package.
