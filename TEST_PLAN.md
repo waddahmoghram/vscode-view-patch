@@ -26,7 +26,7 @@ diff editor rendering, and the registries' own behavior.
 | R10 | Review state: a reviewed checkmark survives a change it no longer describes, or a refresh silently replaces the snapshot under review. |
 | R11 | Series and merges: dependent patches are applied out of order, or a merge's combined diff is applied as text. |
 | R12 | Oldest supported editor: the extension relies on behavior newer than `engines.vscode` (`^1.90.0`) allows. |
-| R13 | Release integrity: the published package differs from the one that passed the tests, ships on the wrong channel, or carries a known-vulnerable dependency. |
+| R13 | Release integrity: the published package differs from the one that passed the tests, ships on the wrong channel, omits files it needs when installed, or carries a known-vulnerable dependency. |
 | R14 | Problem-report privacy: a report or diagnostics reveal the home folder or workspace paths, or anything is copied or opened before the user confirms. |
 
 ## Test layers and environments
@@ -44,19 +44,20 @@ Each leg compiles both bundles, runs the unit tests, and runs the editor and Res
 | Restricted Mode | [`scripts/test-restricted.mjs`](scripts/test-restricted.mjs) launches an isolated VS Code with workspace trust enabled, Git disabled, and a fresh profile, then runs [`src/test/restricted/run.ts`](src/test/restricted/run.ts). | Every matrix leg. |
 | Web extension host | [`scripts/test-web.mjs`](scripts/test-web.mjs) runs the suite in VS Code for the Web on headless Chromium through `@vscode/test-web`, loading the production bundle `dist/web/extension.js`. | `test-web` job: Linux, after the matrix passes. |
 | Packaging gate | `npm audit --include=dev`, then `vsce package` (with `--pre-release` when the Publish workflow asks); the package's SHA-256 (Secure Hash Algorithm, 256-bit) digest is recorded and the file is uploaded as the `view-patch-vsix` artifact. | `package` job: Linux, after the matrix passes. |
+| Installed package | [`scripts/test-package.mjs`](scripts/test-package.mjs) installs a built `.vsix` file into a fresh extensions folder with the VS Code command-line interface, then runs [`src/test/package`](src/test/package) in that VS Code with a fresh profile. An empty stub stands in for the development extension, so the installed copy is the only View Patch that loads. | `smoke` job: Linux, stable VS Code, after `package`, on the `view-patch-vsix` artifact. |
 | Publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml), described below. | Tag pushes and manual runs from `main`. |
 | Inventory drift | `node scripts/test-inventory.mjs --check`, described in [Test inventory](#test-inventory). | Linux stable leg. |
 | Static analysis | CodeQL `security-and-quality` queries for JavaScript and TypeScript ([`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)). Not a release gate. | Pushes and pull requests to `main`, and weekly. |
 | Quality dashboard | [`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs), run by [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml), reports release-readiness rules, workflow history, test counts from CI logs, digest agreement, registry listings, each source's age, and the change in each aggregate number since the previous day's metrics snapshot, which it keeps as a 90-day artifact. A monitor, not a gate; see [Quality dashboard](RELEASING.md#quality-dashboard). | Daily, by hand, and after CI or Publish runs on `main` or a release tag. |
 
 The Publish workflow first calls CI as its `verify` job, so a release waits for every matrix leg, the web tests,
-the audit, and packaging. Its `publish` job then checks that a release tag matches the `package.json` version,
-downloads the exact package CI built instead of rebuilding it, checks that the package's pre-release flag matches
-the requested channel, records the digest, publishes with Trusted Publishing, and for a tag attaches the same file
-to a GitHub release. A separate `open-vsx` job, which runs only when the repository variable `OPEN_VSX_PUBLISHING`
-is `trusted` or `token`, downloads the same package, records its digest, and publishes it to Open VSX. Comparing
-the recorded digests shows whether each registry received the tested file. Concurrent publishing runs are
-serialized.
+the audit, packaging, and the installed-package smoke test. Its `publish` job then checks that a release tag
+matches the `package.json` version, downloads the exact package CI built instead of rebuilding it, checks that the
+package's pre-release flag matches the requested channel, records the digest, publishes with Trusted Publishing,
+and for a tag attaches the same file to a GitHub release. A separate `open-vsx` job, which runs only when the
+repository variable `OPEN_VSX_PUBLISHING` is `trusted` or `token`, downloads the same package, records its digest,
+and publishes it to Open VSX. Comparing the recorded digests shows whether each registry received the tested file.
+Concurrent publishing runs are serialized.
 
 ## Traceability
 
@@ -92,6 +93,7 @@ Each row names the files that guard a risk and representative tests from them, q
 | R11 | editor | [`src/test/integration/features.test.ts`](src/test/integration/features.test.ts) | "shows a merge commit as real per-parent changes when its repository is known"; "shows per-parent hunk views for a combined diff whose repository is unknown" |
 | R12 | all desktop layers | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | The `vscode: 1.90.0` matrix leg repeats the unit, editor, and Restricted Mode suites on the oldest supported VS Code. |
 | R13 | packaging gate | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Steps **Audit dependency vulnerabilities**, **Package**, and **Record the package digest** in the `package` job. |
+| R13 | package | [`src/test/package/smoke.test.ts`](src/test/package/smoke.test.ts) | "activates the installed copy at the packaged version, not a development folder"; "opens the built-in sample as a review"; "opens a patch as complete files and leaves its repository unchanged"; "opens a repository-free patch hunks-only as a partial review" |
 | R13 | publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml) | Steps **Check that the tag matches package.json**, **Download the package that CI verified**, and **Check the package's channel and record its digest** in `publish`; **Record the package digest** in `open-vsx`. |
 | R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match"; "reads no log for a publishing job that the run skipped and compares the other digests"; "leaves digests unavailable when the package or Marketplace publish job has no readable digest"; "keeps an Open VSX job that ran without a matching digest visible as failed or unverified"; "reads digests only from the package, publish, and Open VSX jobs, not other jobs named like them" |
 | R14 | unit | [`src/test/unit/problemReport.test.ts`](src/test/unit/problemReport.test.ts) | "shows a POSIX home folder as ~ wherever a path starts with it"; "matches a Windows home case-insensitively with either slash"; "shows a workspace folder as <workspace>, even inside the home folder"; "does not redact a folder that only prefixes another folder name" |
@@ -113,12 +115,13 @@ disagree with the sources; update this plan in the same change as the tests.
 
 <!-- test-inventory:begin -->
 
-| Layer      | Runner                                         | Test sources                        | Count |
-| ---------- | ---------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   371 |
-| editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
-| restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
-| web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     6 |
+| Layer      | Runner                                                            | Test sources                        | Count |
+| ---------- | ----------------------------------------------------------------- | ----------------------------------- | ----: |
+| unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   362 |
+| editor     | Mocha in VS Code, `npm run test:editor`                           | `src/test/integration/**/*.test.ts` |    56 |
+| restricted | Isolated VS Code, `npm run test:restricted`                       | `src/test/restricted/run.ts`        |     1 |
+| web        | Mocha in headless Chromium, `npm run test:web`                    | `src/test/web/suite.test.ts`        |     6 |
+| package    | Mocha in VS Code on the installed `.vsix`, `npm run test:package` | `src/test/package/**/*.test.ts`     |     4 |
 
 <!-- test-inventory:end -->
 
@@ -129,7 +132,8 @@ with `[xN]`. It reports a test it cannot count exactly, such as one inside a hel
 a problem rather than guessing. The restricted layer is one scripted session rather than a Mocha suite, so it
 counts the scenarios that print a `PASS:` line. Skipped tests are still counted here, while runners report them
 separately. CI runs the unit, editor, and Restricted Mode layers once per matrix leg, and the Linux stable leg runs
-the unit tests twice, once for coverage.
+the unit tests twice, once for coverage. The package layer runs once, in the `smoke` job, on Linux with
+stable VS Code.
 
 Linux and macOS run every unit test, so `node:test` reports `ℹ skipped 0` there. Windows skips exactly one by
 design and reports `ℹ skipped 1`: "preserves literal pathspec characters, tabs, and newlines" in
@@ -145,10 +149,12 @@ Not automated:
 
 - A real remote window, such as one over Secure Shell (SSH): a complete-file review, a hunk-only review, refresh,
   and closing the last tab. The provider-backed address test covers path handling with a stand-in file system,
-  not a remote extension host.
+  not a remote extension host. The package layer installs the built file into a local desktop VS Code, which shows
+  that it contains what it needs to activate and open reviews, but it runs in the local extension host too.
 - A public vscode.dev session with the extension installed from the Marketplace: hunk-only reviews from the
   clipboard and from a patch file in a GitHub repository, and a saved review reopened after a reload. The web tests
-  load the development folder into a local VS Code for the Web server instead.
+  load the development folder into a local VS Code for the Web server instead, and the package layer tests the
+  desktop host only.
 - The Open VSX listing after an Open VSX publish. The quality dashboard reports the listed version, channel, and
   whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
@@ -177,8 +183,9 @@ Known defects:
 [RELEASING.md](RELEASING.md) is the procedure; this section only names the gates.
 
 - Entry: CI is green on `main` for the release commit, including every matrix leg, the web tests, the dependency
-  audit, packaging, and the inventory check; the version and `CHANGELOG.md` are updated as
-  [Each release](RELEASING.md#each-release) describes; for a regular release, the manual checks above are done.
+  audit, packaging, the installed-package smoke test, and the inventory check; the version and `CHANGELOG.md` are
+  updated as [Each release](RELEASING.md#each-release) describes; for a regular release, the manual checks above
+  are done.
 - Exit: the Publish run succeeded; the digests recorded by the packaging job and by each publishing job are equal;
   the Marketplace lists the new version on the intended channel; and when Open VSX publishing is enabled, its job
   succeeded too. The quality dashboard re-checks the digests after each Publish run, adding the Marketplace's own
@@ -186,8 +193,8 @@ Known defects:
 
 ## Running each layer
 
-From a clean checkout, with Git on `PATH`. On Linux without a display, prefix the editor, Restricted Mode, and web
-commands with `xvfb-run -a`.
+From a clean checkout, with Git on `PATH`. On Linux without a display, prefix the editor, Restricted Mode, web, and
+package commands with `xvfb-run -a`.
 
 ```bash
 npm ci
@@ -199,10 +206,14 @@ npm run test:editor
 VSCODE_TEST_VERSION=1.90.0 npm run test:editor
 npm run test:restricted
 npm run test:web
+npx vsce package --out view-patch.vsix
+npm run test:package -- view-patch.vsix
 node scripts/test-inventory.mjs --check
 ```
 
 `npm test` compiles and then runs the unit, editor, and Restricted Mode layers. Options after
 `npm run test:web --` reach the web runner: `--quality insiders`, `--headed`, `--verbose`, and `--port <n>`; its
-first run downloads VS Code for the Web. For the packaging gate, run `npm audit --include=dev`,
-`npx vsce package`, and `npx vsce ls`, as in [Checking a package locally](RELEASING.md#checking-a-package-locally).
+first run downloads VS Code for the Web. `npm run test:package` takes the package's path, `view-patch.vsix` by
+default, and needs `npm run compile` for the suite, which the package does not contain; `VSCODE_TEST_VERSION`
+selects the VS Code it installs into. For the packaging gate, run `npm audit --include=dev`, `npx vsce package`,
+and `npx vsce ls`, as in [Checking a package locally](RELEASING.md#checking-a-package-locally).

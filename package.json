@@ -459,6 +459,7 @@
     "test:editor": "vscode-test",
     "test:restricted": "node scripts/test-restricted.mjs",
     "test:web": "node scripts/test-web.mjs",
+    "test:package": "node scripts/test-package.mjs",
     "package": "vsce package"
   },
   "devDependencies": {

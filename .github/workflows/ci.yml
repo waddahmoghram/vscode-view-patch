@@ -93,3 +93,22 @@ jobs:
         with:
           name: view-patch-vsix
           path: view-patch.vsix
+
+  smoke:
+    name: Installed VSIX smoke test
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      - name: Download the package that CI built
+        uses: actions/download-artifact@v8
+        with:
+          name: view-patch-vsix
+      - name: Install the package and run the smoke tests
+        run: xvfb-run -a npm run test:package -- view-patch.vsix

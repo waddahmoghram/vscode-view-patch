@@ -19,12 +19,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const PLAN_FILE = 'TEST_PLAN.md';
 
 // Each pattern mirrors what the layer's runner loads: the compiled **/*.test.js globs in package.json and
-// .vscode-test.mjs, the run.js that scripts/test-restricted.mjs launches, and the suite esbuild.webtest.mjs bundles.
+// .vscode-test.mjs, the run.js that scripts/test-restricted.mjs launches, the suite esbuild.webtest.mjs bundles,
+// and the *.test.js files that src/test/package/index.ts adds.
 export const LAYERS = [
     { id: 'unit', dir: 'src/test/unit', pattern: /\.test\.ts$/, kind: 'tests', runner: 'node:test' },
     { id: 'editor', dir: 'src/test/integration', pattern: /\.test\.ts$/, kind: 'tests', runner: 'Mocha in VS Code' },
     { id: 'restricted', dir: 'src/test/restricted', pattern: /^run\.ts$/, kind: 'scenarios', runner: 'isolated VS Code' },
     { id: 'web', dir: 'src/test/web', pattern: /^suite\.test\.ts$/, kind: 'tests', runner: 'Mocha in Chromium' },
+    { id: 'package', dir: 'src/test/package', pattern: /\.test\.ts$/, kind: 'tests', runner: 'Mocha in VS Code (installed VSIX)' },
 ];
 
 const TEST_CALLS = new Set(['test', 'it']);
