@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.7
+
+- The regular release of pre-release [0.3.6](CHANGELOG.md#036), with the same code. New on the regular channel:
+  **Report a Problem...**, folder paths hidden in **Copy Diagnostics**, and opening a single patch dropped on the
+  Patch Reviews view. Before release, 0.3.6 passed the manual remote and web checks recorded in the
+  [release runbook](RELEASE_RUNBOOK.md).
+
 ## 0.3.6
 
 Pre-release.
