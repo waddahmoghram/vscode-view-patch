@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.6
+
+Pre-release.
 
 - New **Report a Problem...** command, in the Patch Reviews view's menu and on View Patch error messages. It shows
   the diagnostics in a read-only preview, with the home folder as `~` and workspace folders as `<workspace>`, and
@@ -9,8 +11,7 @@
 - **Copy Diagnostics** now hides the home and workspace folder paths in the same way.
 - Dropping a single patch file on the Patch Reviews view now opens that patch, instead of the patch in the active
   editor or a file dialog.
-- GitHub releases now carry that version's changelog section, the Marketplace link, and the package's SHA-256
-  instead of a pointer to this file.
+- GitHub releases now carry that version's changelog section, the Marketplace link, and the package's Secure Hash Algorithm (SHA-256) checksum instead of a pointer to this file.
 
 ## 0.3.5
 

@@ -100,10 +100,39 @@ give a regular release a version higher than the latest pre-release for pre-rele
 
 ## Pre-releases
 
-Run the Publish workflow by hand from the **Actions** tab, from `main`, with **Publish as a pre-release** checked. A
-pre-release needs a version number of its own. Preview status is a flag recorded in the package when the verification
-workflow builds it, not a `-beta` suffix on the version. VS Code moves users to the highest available version, so plan
-preview and regular versions together.
+Run the Publish workflow by hand from the **Actions** tab, from `main`, with **Publish as a pre-release** checked.
+A pre-release needs a version number of its own.
+Preview status is a flag recorded in the package when the verification workflow builds it, not a `-beta` suffix on the version.
+VS Code moves users to the highest available version, so plan preview and regular versions together.
+
+For the prepared `0.3.6` candidate, the version and lockfile are already updated and the former `Unreleased` notes are under `## 0.3.6`.
+Do not bump them again unless that version has since been published.
+Use this sequence to finish the release:
+
+1. Review the changes from `main` to `vp/improvements`.
+   In a clean checkout on `main`, run `git merge --ff-only vp/improvements`.
+   If it cannot fast-forward, stop and reconcile the changes before publishing.
+1. From an authenticated terminal, push only `main` to `https://github.com/waddahmoghram/vscode-view-patch.git`.
+   Do not create or push `v0.3.6`: version tags trigger a regular release in this repository.
+1. On [Actions](https://github.com/waddahmoghram/vscode-view-patch/actions), wait for continuous integration (CI) and CodeQL to pass on the pushed commit.
+   Check that the Windows unit tests skip only the one filename test documented in [the test plan](TEST_PLAN.md#test-inventory).
+1. Open [Publish](https://github.com/waddahmoghram/vscode-view-patch/actions/workflows/publish.yml), choose **Run workflow**, select `main`, leave **Publish as a pre-release** checked, and run it once.
+   Confirm the run uses the intended commit.
+   Trusted Publishing uses the workflow's identity, so no local Marketplace token is needed.
+1. Wait for every verification job and the Marketplace publish job to pass.
+   The optional Open VSX job may be skipped.
+   The package and publishing summaries must show `pre-release` and the same SHA-256 checksum.
+1. After Marketplace processing, check [View Patch](https://marketplace.visualstudio.com/items?itemName=waddahmoghram.view-patch) offers `0.3.6` as a pre-release while `0.3.5` remains the regular version.
+   Choose **Switch to Pre-Release Version** in VS Code, reload, and run **View Patch: Copy Diagnostics** to confirm `0.3.6` is actually loaded.
+
+This manual workflow does not create a GitHub release.
+If a run fails after publishing has started, inspect its publishing step and the Marketplace before retrying; never blindly rerun an already-published version.
+If source changes are needed after publication, use a new version.
+
+Before promoting this candidate to a regular release, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.6` for the runtime identity gate rather than the old campaign's version.
+Also try dropping one patch while another file is active, and **Report a Problem...**: cancellation must leave the clipboard untouched and open no browser; confirmation must copy only the previewed report and open the issue form without submitting it.
+Review the preview for remaining private information before confirming.
+Automated tests do not replace these manual checks.
 
 ## Checking a package locally
 
