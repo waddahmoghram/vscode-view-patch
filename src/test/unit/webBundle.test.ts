@@ -1,12 +1,13 @@
 // Validates the web-bundle groundwork (esbuild.web.mjs + src/browser.ts) against Node's own
-// implementations as oracles. Every test skips when the dev-only packages (esbuild, buffer) or
-// the bundle config are missing, so this file never breaks `npm test` on a tree that has not
-// adopted the web build.
+// implementations as oracles. esbuild and buffer are devDependencies that `npm ci` installs and
+// `npm run compile:web` needs, so a missing package or an unloadable esbuild.web.mjs fails these
+// tests rather than skipping them.
 import * as assert from 'node:assert/strict';
 import { isUtf8 as nodeIsUtf8 } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
 import * as nodePath from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as vm from 'node:vm';
 
 interface WebBuildConfig {
@@ -14,22 +15,13 @@ interface WebBuildConfig {
     buildOptions(overrides?: object): object;
 }
 
-async function optionalImport(name: string): Promise<any | undefined> {
-    try {
-        return await import(name);
-    } catch {
-        try {
-            // Specifiers like 'buffer/' (the npm package shadowing the built-in) need CommonJS resolution.
-            return require(name);
-        } catch {
-            return undefined;
-        }
-    }
+/** import() needs a URL: it reads a bare Windows path such as C:\repo\x.mjs as the URL scheme "c:". */
+function moduleUrl(filePath: string, windows?: boolean): string {
+    return pathToFileURL(filePath, { windows }).href;
 }
 
-function loadConfig(): Promise<WebBuildConfig | undefined> {
-    const configPath = nodePath.join(__dirname, '..', '..', '..', 'esbuild.web.mjs');
-    return optionalImport(configPath.startsWith('/') ? `file://${configPath}` : configPath);
+function loadConfig(): Promise<WebBuildConfig> {
+    return import(moduleUrl(nodePath.join(__dirname, '..', '..', '..', 'esbuild.web.mjs')));
 }
 
 /** Imports one inline shim, replacing its polyfill import so a data: module can load it. */
@@ -40,12 +32,19 @@ async function importShim(config: WebBuildConfig, name: string): Promise<any> {
     return import(`data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`);
 }
 
-test('buffer polyfill behaves like the Node Buffer for every operation the sources use', async t => {
-    const polyfill = await optionalImport('buffer/');
-    if (!polyfill) {
-        return t.skip('the buffer polyfill is not installed');
-    }
-    const B = polyfill.Buffer;
+test('converts Windows drive-letter and POSIX paths to file: URLs for import()', () => {
+    const windowsPath = 'C:\\work\\view-patch\\esbuild.web.mjs';
+    assert.equal(moduleUrl(windowsPath, true), 'file:///C:/work/view-patch/esbuild.web.mjs');
+    assert.equal(fileURLToPath(moduleUrl(windowsPath, true), { windows: true }), windowsPath);
+    // Prefixing file:// to a POSIX path would also turn a # in a folder name into a URL fragment.
+    const posixPath = '/home/runner/work #1/esbuild.web.mjs';
+    assert.equal(new URL(moduleUrl(posixPath, false)).protocol, 'file:');
+    assert.equal(fileURLToPath(moduleUrl(posixPath, false), { windows: false }), posixPath);
+});
+
+test('buffer polyfill behaves like the Node Buffer for every operation the sources use', () => {
+    // Specifiers like 'buffer/' (the npm package shadowing the built-in) need CommonJS resolution.
+    const B = require('buffer/').Buffer;
     assert.notStrictEqual(B, Buffer, 'the polyfill must be its own implementation');
     const sub = B.from('hello world', 'utf8').subarray(0, 5);
     assert.ok(sub instanceof B, 'subarray must stay a polyfill Buffer');
@@ -62,11 +61,8 @@ test('buffer polyfill behaves like the Node Buffer for every operation the sourc
     assert.equal(B.from('616263', 'hex').toString('utf8'), 'abc');
 });
 
-test('sha256 shim matches node:crypto on all block boundaries and a large input', async t => {
+test('sha256 shim matches node:crypto on all block boundaries and a large input', async () => {
     const config = await loadConfig();
-    if (!config) {
-        return t.skip('esbuild.web.mjs is not present');
-    }
     const shim = await importShim(config, 'crypto');
     for (let length = 0; length <= 130; length++) {
         const bytes = randomBytes(length);
@@ -96,11 +92,8 @@ test('sha256 shim matches node:crypto on all block boundaries and a large input'
     assert.equal(shim.randomBytes(8).length, 8);
 });
 
-test('isUtf8 shim matches node:buffer.isUtf8', async t => {
+test('isUtf8 shim matches node:buffer.isUtf8', async () => {
     const config = await loadConfig();
-    if (!config) {
-        return t.skip('esbuild.web.mjs is not present');
-    }
     const shim = await importShim(config, 'node:buffer');
     const cases: Uint8Array[] = [
         new Uint8Array(0),
@@ -122,11 +115,8 @@ test('isUtf8 shim matches node:buffer.isUtf8', async t => {
     }
 });
 
-test('path shim matches node:path.posix for the calls the sources make', async t => {
+test('path shim matches node:path.posix for the calls the sources make', async () => {
     const config = await loadConfig();
-    if (!config) {
-        return t.skip('esbuild.web.mjs is not present');
-    }
     const shim = await importShim(config, 'path');
     const samples = [
         '/repo/sub/file.patch', 'file.patch', '/one/two/', 'a/b/../c', './x', '/', 'nested/dir/name.diff',
@@ -142,13 +132,9 @@ test('path shim matches node:path.posix for the calls the sources make', async t
     assert.equal(shim.resolve('/base', 'child'), nodePath.posix.resolve('/base', 'child'));
 });
 
-test('web bundle builds, contains no Node built-in requires, and loads without Buffer or process', async t => {
+test('web bundle builds, contains no Node built-in requires, and loads without Buffer or process', async () => {
     const config = await loadConfig();
-    const esbuild = await optionalImport('esbuild');
-    const polyfill = await optionalImport('buffer/');
-    if (!config || !esbuild || !polyfill) {
-        return t.skip('esbuild, the buffer polyfill, or esbuild.web.mjs is not installed');
-    }
+    const esbuild = require('esbuild');
     const result = await esbuild.build(config.buildOptions({
         write: false,
         outfile: 'dist/web/extension.js',
