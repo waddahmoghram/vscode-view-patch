@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- New **Report a Problem...** command, in the Patch Reviews view's menu and on View Patch error messages. It shows
+  the diagnostics in a read-only preview, with the home folder as `~` and workspace folders as `<workspace>`, and
+  only after you confirm copies them and opens the GitHub issue form. Nothing is sent, and no report content is
+  put in the form's address.
+- **Copy Diagnostics** now hides the home and workspace folder paths in the same way.
+- GitHub releases now carry that version's changelog section, the Marketplace link, and the package's SHA-256
+  instead of a pointer to this file.
+
 ## 0.3.5
 
 - The first regular release since 0.3.0. It carries the 0.3.1 to 0.3.4 pre-releases below; its code is unchanged
