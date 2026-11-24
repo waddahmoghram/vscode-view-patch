@@ -46,7 +46,7 @@ Each leg compiles both bundles, runs the unit tests, and runs the editor and Res
 | Publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml), described below. | Tag pushes and manual runs from `main`. |
 | Inventory drift | `node scripts/test-inventory.mjs --check`, described in [Test inventory](#test-inventory). | Linux stable leg. |
 | Static analysis | CodeQL `security-and-quality` queries for JavaScript and TypeScript ([`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)). Not a release gate. | Pushes and pull requests to `main`, and weekly. |
-| Quality dashboard | [`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs), run by [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml), reports release-readiness rules, workflow history, test counts from CI logs, digest agreement, and registry listings. A monitor, not a gate; see [Quality dashboard](RELEASING.md#quality-dashboard). | Daily, by hand, and after CI or Publish runs on `main` or a release tag. |
+| Quality dashboard | [`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs), run by [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml), reports release-readiness rules, workflow history, test counts from CI logs, digest agreement, registry listings, each source's age, and the change in each aggregate number since the previous day's metrics snapshot, which it keeps as a 90-day artifact. A monitor, not a gate; see [Quality dashboard](RELEASING.md#quality-dashboard). | Daily, by hand, and after CI or Publish runs on `main` or a release tag. |
 
 The Publish workflow first calls CI as its `verify` job, so a release waits for every matrix leg, the web tests,
 the audit, and packaging. Its `publish` job then checks that a release tag matches the `package.json` version,
@@ -112,7 +112,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                         | Test sources                        | Count |
 | ---------- | ---------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   367 |
+| unit       | `node:test`, `npm run test:unit`               | `src/test/unit/**/*.test.ts`        |   371 |
 | editor     | Mocha in VS Code, `npm run test:editor`        | `src/test/integration/**/*.test.ts` |    56 |
 | restricted | Isolated VS Code, `npm run test:restricted`    | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web` | `src/test/web/suite.test.ts`        |     6 |

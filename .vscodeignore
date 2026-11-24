@@ -3,6 +3,7 @@
 .vscode-test/**
 .vscode-test.mjs
 .dashboard/**
+.dashboard-history/**
 .gitignore
 src/**
 scripts/**

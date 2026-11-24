@@ -1,4 +1,5 @@
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +23,14 @@ interface Dashboard {
     renderHtml(report: Json): string;
     renderMarkdown(report: Json): string;
     collect(options: Json): Promise<Json>;
+    snapshotFileName(iso: string): string;
+    metricsSnapshot(report: Json): Json;
+    readHistory(dir?: string): Json;
+    metricDeltas(current: Json, previous?: Json): Json[];
+    trend(current: Json, history?: Json): Json;
+    formatDelta(kind: string, delta: number | null): string;
+    freshness(report: Json, now?: Date): Json;
+    formatAge(ms?: number): string;
 }
 
 const script = path.join(__dirname, '..', '..', '..', 'scripts', 'quality-dashboard.mjs');
@@ -549,5 +558,147 @@ describe('quality dashboard output', () => {
         assert.match(markdown, /\| Marketplace \| 0\.3\.2 \(pre-release\); 3 installs, 29 downloads, 1 updates \|/);
         assert.match(markdown, /\| Open VSX \| not listed \|/);
         assert.match(markdown, /\| Dependabot pull requests \| #9 \(7 days\) \|/);
+    });
+});
+
+describe('quality dashboard history', () => {
+    const snapshot = (date: string, metrics: Json, extra: Json = {}): Json => ({
+        kind: 'view-patch-dashboard-metrics', schemaVersion: 1, date, generatedAt: `${date}T05:41:00.000Z`,
+        repository: 'o/r', readiness: 'ready', marketplaceVersion: '0.3.1', metrics, unavailable: {}, ...extra,
+    });
+
+    test('writes a compact snapshot of aggregate numbers named for its UTC day, with a reason for each unknown', async () => {
+        const { collect, metricsSnapshot, snapshotFileName } = await load();
+        assert.equal(snapshotFileName('2026-11-11T23:59:59Z'), 'metrics-2026-11-11.json');
+        assert.equal(snapshotFileName('2026-11-12T01:00:00+02:00'), 'metrics-2026-11-11.json');
+        assert.throws(() => snapshotFileName('yesterday'), /not a valid time/);
+
+        const anonymous = metricsSnapshot(await collect({ repository: 'o/r', now: NOW, fetch: fakeFetch(routes(), []) }));
+        assert.deepEqual([anonymous.kind, anonymous.schemaVersion, anonymous.date, anonymous.generatedAt],
+            ['view-patch-dashboard-metrics', 1, '2026-11-11', NOW.toISOString()]);
+        assert.deepEqual([anonymous.metrics.ciPassRate, anonymous.metrics.marketplaceInstalls,
+            anonymous.metrics.dependabotOpen, anonymous.marketplaceVersion], [1, 3, 1, '0.3.2']);
+        for (const key of ['unitTests', 'editorTestsPassing', 'webTestsPassing', 'openVsxDownloads']) {
+            assert.equal(anonymous.metrics[key], null, key);
+        }
+        assert.match(anonymous.unavailable.unitTests, /GITHUB_TOKEN/);
+        assert.equal(anonymous.unavailable.openVsxDownloads, 'not listed on Open VSX');
+        assert.ok(!('marketplaceInstalls' in anonymous.unavailable));
+        const text = JSON.stringify(anonymous);
+        assert.doesNotMatch(text, /https?:|dependabot\[bot\]|Bump esbuild|84c7a7c|\n/);
+
+        const sent: Sent[] = [];
+        const withLogs = metricsSnapshot(
+            await collect({ repository: 'o/r', token: 't', now: NOW, fetch: fakeFetch(routes(), sent) }));
+        assert.deepEqual([withLogs.metrics.unitTests, withLogs.metrics.editorTestsPassing, withLogs.metrics.webTestsPassing],
+            [334, 56, 5]);
+    });
+
+    test('compares with the newest snapshot from an earlier day and never turns an unknown value into a change', async () => {
+        const { metricDeltas, trend, formatDelta } = await load();
+        const current = snapshot('2026-11-11', { marketplaceInstalls: 3, unitTests: 334, ciPassRate: 0.9, dependabotOpen: 1,
+            openVsxDownloads: null }, { unavailable: { openVsxDownloads: 'not listed on Open VSX' } });
+        const byKey = (rows: Json[]): Json => Object.fromEntries(rows.map(row => [row.key, row]));
+
+        const alone = byKey(metricDeltas(current));
+        assert.deepEqual([alone.marketplaceInstalls.current, alone.marketplaceInstalls.previous,
+            alone.marketplaceInstalls.previousReason, alone.marketplaceInstalls.delta], [3, null, 'no previous snapshot', null]);
+        assert.deepEqual([alone.openVsxDownloads.current, alone.openVsxDownloads.currentReason],
+            [null, 'not listed on Open VSX']);
+
+        const history = {
+            available: true,
+            skipped: [],
+            snapshots: [
+                snapshot('2026-11-09', { marketplaceInstalls: 0 }),
+                snapshot('2026-11-10', { marketplaceInstalls: 1, unitTests: null, ciPassRate: 0.85, dependabotOpen: 1 },
+                    { unavailable: { unitTests: 'job logs can be read only with GITHUB_TOKEN' } }),
+                snapshot('2026-11-11', { marketplaceInstalls: 2 }),
+                snapshot('2026-11-10', { marketplaceInstalls: 9 }, { repository: 'other/repo' }),
+            ],
+        };
+        const summary = trend(current, history);
+        assert.deepEqual([summary.available, summary.snapshotsRead, summary.previous.date], [true, 4, '2026-11-10']);
+        const rows = byKey(summary.rows);
+        assert.deepEqual([rows.marketplaceInstalls.previous, rows.marketplaceInstalls.delta], [1, 2]);
+        assert.deepEqual([rows.unitTests.current, rows.unitTests.previous, rows.unitTests.delta, rows.unitTests.previousReason],
+            [334, null, null, 'job logs can be read only with GITHUB_TOKEN']);
+        assert.equal(rows.ciPassRate.delta, 0.05);
+        assert.equal(rows.dependabotOpen.delta, 0);
+        assert.equal(rows.webTestsPassing.previousReason, 'not in that snapshot');
+
+        assert.deepEqual([formatDelta('count', rows.marketplaceInstalls.delta), formatDelta('rate', rows.ciPassRate.delta),
+            formatDelta('count', 0), formatDelta('duration', -65_000), formatDelta('count', null)],
+        ['+2', '+5.0 points', 'no change', '-1m 5s', '—']);
+        assert.deepEqual([trend(current).available, trend(current).reason], [false, 'no history folder was given']);
+        assert.equal(trend(current, { available: true, snapshots: [history.snapshots[2]], skipped: [] }).previous, undefined);
+    });
+
+    test('reads snapshots from a history folder and its subfolders, skipping unusable files', async () => {
+        const { collect, readHistory, renderHtml, renderMarkdown } = await load();
+        const dir = fs.mkdtempSync(path.join(__dirname, 'history-'));
+        try {
+            const write = (name: string, body: string): void => {
+                fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+                fs.writeFileSync(path.join(dir, name), body);
+            };
+            write('run-7/metrics-2026-11-10.json', JSON.stringify(snapshot('2026-11-10', { marketplaceInstalls: 1 })));
+            write('metrics-2026-11-09.json', JSON.stringify(snapshot('2026-11-08', { marketplaceInstalls: 0 })));
+            write('metrics-2026-11-07.json', '{');
+            write('notes.json', JSON.stringify(snapshot('2026-11-01', {})));
+            assert.equal(readHistory(undefined), undefined);
+            assert.deepEqual(readHistory(path.join(dir, 'missing')), { available: true, snapshots: [], skipped: [] });
+
+            const history = readHistory(dir);
+            assert.deepEqual(history.snapshots.map((entry: Json) => entry.date), ['2026-11-10']);
+            assert.deepEqual(history.skipped, [
+                { file: 'metrics-2026-11-07.json', reason: 'not valid JSON' },
+                { file: 'metrics-2026-11-09.json', reason: 'its date 2026-11-08 does not match its file name' },
+            ]);
+
+            const report = await collect({ repository: 'o/r', now: NOW, fetch: fakeFetch(routes(), []), history });
+            assert.equal(report.trend.previous.date, '2026-11-10');
+            const html = renderHtml(report);
+            assert.match(html, /<h2 id="trend">Change since the previous snapshot<\/h2>/);
+            assert.match(html, /<th scope="row">Marketplace installs<\/th><td>3<\/td><td>1<\/td><td>\+2<\/td>/);
+            assert.match(html,
+                /<th scope="row">Unit tests in the latest CI run<\/th><td><span class="unavailable">unavailable: job logs/);
+            assert.match(html, /<code>metrics-2026-11-07\.json<\/code> \(not valid JSON\)/);
+            const markdown = renderMarkdown(report);
+            assert.match(markdown, /\*\*Change since the snapshot of 2026-11-10\*\*/);
+            assert.match(markdown, /\| Marketplace installs \| 3 \| 1 \| \+2 \|/);
+            assert.match(markdown,
+                /\| Open VSX downloads \| unavailable: not listed on Open VSX \| unavailable: not in that snapshot \| — \|/);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test('reports the age of the page and each source, and an unavailable time instead of a zero age', async () => {
+        const { collect, freshness, formatAge, renderHtml } = await load();
+        const report = await collect({ repository: 'o/r', now: NOW, fetch: fakeFetch(routes(), []) });
+        const atGeneration = freshness(report);
+        assert.deepEqual([atGeneration.ageMs, atGeneration.stale], [0, false]);
+        const rows = Object.fromEntries(atGeneration.rows.map((row: Json) => [row.label, row]));
+        assert.equal(rows['Latest completed CI run on main'].ageMs, 6 * 3_600_000);
+        assert.deepEqual([rows['Previous metrics snapshot'].ageMs, rows['Previous metrics snapshot'].reason],
+            [undefined, 'no history folder was given']);
+
+        const later = freshness(report, new Date(NOW.getTime() + 3 * 86_400_000));
+        assert.deepEqual([later.stale, formatAge(later.ageMs)], [true, '3 days']);
+        assert.deepEqual([formatAge(0), formatAge(3_600_000), formatAge(47 * 3_600_000), formatAge(undefined)],
+            ['under an hour', '1 hour', '47 hours', '—']);
+        assert.equal(freshness({ ...report, generatedAt: 'not a time' }).stale, true);
+
+        const failed = await collect({ repository: 'o/r', now: NOW, fetch: fakeFetch({}, []) });
+        const failedRows = freshness(failed).rows.slice(1, 5);
+        assert.ok(failedRows.every((row: Json) => row.ageMs === undefined && /returned 404/.test(row.reason)),
+            JSON.stringify(failedRows));
+        const html = renderHtml(failed);
+        assert.match(html,
+            /<th scope="row">Latest completed CI run on main<\/th><td><span class="unavailable">unavailable: GitHub returned 404/);
+        assert.match(html,
+            /<th scope="row">Marketplace installs<\/th><td><span class="unavailable">unavailable: the Marketplace returned 404/);
+        assert.doesNotMatch(html, /<th scope="row">Marketplace installs<\/th><td>0</);
     });
 });
