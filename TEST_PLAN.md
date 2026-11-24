@@ -124,9 +124,17 @@ Mocha. Parameterized tests are why a naive search for `test(` finds fewer: unit 
 `for (const x of [...])` run once per array element, so the scan counts them that way, and `--list` marks them
 with `[xN]`. It reports a test it cannot count exactly, such as one inside a helper function or a conditional, as
 a problem rather than guessing. The restricted layer is one scripted session rather than a Mocha suite, so it
-counts the scenarios that print a `PASS:` line. Skipped tests would still be counted here, while runners report
-them separately; there are none. CI runs the unit, editor, and Restricted Mode layers once per matrix leg, and the
-Linux stable leg runs the unit tests twice, once for coverage.
+counts the scenarios that print a `PASS:` line. Skipped tests are still counted here, while runners report them
+separately. CI runs the unit, editor, and Restricted Mode layers once per matrix leg, and the Linux stable leg runs
+the unit tests twice, once for coverage.
+
+Linux and macOS run every unit test, so `node:test` reports `ℹ skipped 0` there. Windows skips exactly one by
+design and reports `ℹ skipped 1`: "preserves literal pathspec characters, tabs, and newlines" in
+[`src/test/unit/patch.test.ts`](src/test/unit/patch.test.ts) sets `skip: process.platform === 'win32'` because it
+creates files whose names contain a tab and a newline, which Windows does not allow in file names. No other unit
+test skips itself. The tests in [`src/test/unit/webBundle.test.ts`](src/test/unit/webBundle.test.ts) import
+`esbuild.web.mjs` through `pathToFileURL()` and fail, rather than skip, when it or the `esbuild` and `buffer`
+development dependencies cannot be loaded. Any other skip count on a matrix leg is a defect.
 
 ## Manual checks and known gaps
 
