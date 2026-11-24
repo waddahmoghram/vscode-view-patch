@@ -105,4 +105,15 @@ describe('release notes', () => {
         assert.equal(malformed.stdout, '');
         assert.match(malformed.stderr, /--sha256 must be 64 hexadecimal digits/);
     });
+
+    test('takes the version from --tag, so a tag without a section fails instead of using package.json', () => {
+        const tagged = run('--tag', 'v0.3.4');
+        assert.equal(tagged.status, 0, tagged.stderr);
+        assert.ok(tagged.stdout.includes('In VS Code for the Web, opening a patch now goes straight'));
+        assert.ok(!tagged.stdout.includes('The first regular release since 0.3.0.'));
+        const unknown = run('--tag', 'v9.9.9');
+        assert.equal(unknown.status, 1);
+        assert.equal(unknown.stdout, '');
+        assert.match(unknown.stderr, /has no "## 9\.9\.9" section/);
+    });
 });

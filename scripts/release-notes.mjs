@@ -2,9 +2,10 @@
 //
 //   node scripts/release-notes.mjs [--version <x.y.z>] [--tag <tag>] [--sha256 <digest>]
 //
-// The version defaults to the one in package.json and the tag to v<version>. A release body has no base address, so
-// relative links are rewritten to the files at that tag on GitHub. The footer links the Marketplace listing and,
-// given --sha256, names the package digest. A missing or empty section is an error, so publishing can stop on it.
+// The version defaults to the tag without its leading v, or else to package.json's, and the tag to v<version>. A
+// release body has no base address, so relative links are rewritten to the files at that tag on GitHub. The footer
+// links the Marketplace listing and, given --sha256, names the package digest. A missing or empty section is an
+// error, so publishing can stop on it.
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -99,7 +100,10 @@ function main() {
     const { values } = parseArgs({
         options: { version: { type: 'string' }, tag: { type: 'string' }, sha256: { type: 'string' } },
     });
-    const version = values.version ?? JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+    // A tag names its own version, so a tag without a changelog section fails instead of borrowing package.json's.
+    const version = values.version
+        ?? values.tag?.replace(/^v/, '')
+        ?? JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     process.stdout.write(releaseNotes({ changelog, version, tag: values.tag, sha256: values.sha256 }));
 }
