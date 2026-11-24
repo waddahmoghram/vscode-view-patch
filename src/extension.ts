@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): ViewPatchApi {
         'viewPatch.openSample': () => reviews.openSample(),
         'viewPatch.openRecent': () => reviews.openRecent(),
         'viewPatch.copyDiagnostics': () => reviews.copyDiagnostics(),
+        'viewPatch.reportProblem': () => reviews.reportProblem(),
         'viewPatch.exportSummary': value => reviews.exportSummary(value),
         'viewPatch.markAllReviewed': value => reviews.markAllReviewed(value),
         'viewPatch.clearReviewed': value => reviews.clearReviewed(value),

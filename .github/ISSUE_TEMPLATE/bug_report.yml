@@ -36,9 +36,10 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: View Patch output log
-      description: View > Output, pick "View Patch" in the dropdown, and paste the lines from the failing attempt.
-        It records repository discovery, base selection, limits, and Git failures.
+      label: View Patch problem report
+      description: Run "View Patch: Report a Problem..." and paste the report it copies. It shows your home folder
+        as ~ and leaves out patch content and repository paths. Add lines from the View Patch output log only after
+        removing private paths.
       render: text
   - type: input
     id: review

@@ -27,6 +27,7 @@ diff editor rendering, and the registries' own behavior.
 | R11 | Series and merges: dependent patches are applied out of order, or a merge's combined diff is applied as text. |
 | R12 | Oldest supported editor: the extension relies on behavior newer than `engines.vscode` (`^1.90.0`) allows. |
 | R13 | Release integrity: the published package differs from the one that passed the tests, ships on the wrong channel, or carries a known-vulnerable dependency. |
+| R14 | Problem-report privacy: a report or diagnostics reveal the home folder or workspace paths, or anything is copied or opened before the user confirms. |
 
 ## Test layers and environments
 
@@ -93,6 +94,8 @@ Each row names the files that guard a risk and representative tests from them, q
 | R13 | packaging gate | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Steps **Audit dependency vulnerabilities**, **Package**, and **Record the package digest** in the `package` job. |
 | R13 | publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml) | Steps **Check that the tag matches package.json**, **Download the package that CI verified**, and **Check the package's channel and record its digest** in `publish`; **Record the package digest** in `open-vsx`. |
 | R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match"; "reads no log for a publishing job that the run skipped and compares the other digests"; "leaves digests unavailable when the package or Marketplace publish job has no readable digest"; "keeps an Open VSX job that ran without a matching digest visible as failed or unverified"; "reads digests only from the package, publish, and Open VSX jobs, not other jobs named like them" |
+| R14 | unit | [`src/test/unit/problemReport.test.ts`](src/test/unit/problemReport.test.ts) | "shows a POSIX home folder as ~ wherever a path starts with it"; "matches a Windows home case-insensitively with either slash"; "shows a workspace folder as <workspace>, even inside the home folder"; "does not redact a folder that only prefixes another folder name" |
+| R14 | editor | [`src/test/integration/features.test.ts`](src/test/integration/features.test.ts) | "previews a redacted problem report and, when cancelled, copies and opens nothing"; "copies the previewed report and opens the issue form with no report content in its address" |
 
 <!-- traceability:end -->
 

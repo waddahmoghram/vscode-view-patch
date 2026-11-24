@@ -186,6 +186,11 @@
         "command": "viewPatch.copyDiagnostics",
         "title": "Copy Diagnostics",
         "category": "View Patch"
+      },
+      {
+        "command": "viewPatch.reportProblem",
+        "title": "Report a Problem...",
+        "category": "View Patch"
       }
     ],
     "customEditors": [
@@ -333,6 +338,11 @@
           "command": "viewPatch.reviewCommit",
           "when": "view == viewPatch.reviews",
           "group": "1_manage@5"
+        },
+        {
+          "command": "viewPatch.reportProblem",
+          "when": "view == viewPatch.reviews",
+          "group": "2_help@1"
         }
       ],
       "view/item/context": [
