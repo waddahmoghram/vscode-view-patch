@@ -87,8 +87,12 @@ give a regular release a version higher than the latest pre-release for pre-rele
    for all Linux, macOS, Windows, oldest-supported-editor, and web tests, dependency auditing, packaging, and a smoke
    test of that `.vsix` as installed to pass.
    It then checks the tag against `package.json`, downloads that exact `.vsix`, checks its channel, and records its
-   SHA-256 digest; the packaging job records the digest too, so the two can be compared. It publishes that file and
-   attaches the same file to a GitHub release. Concurrent publishing runs are serialized.
+   SHA-256 digest; the packaging job records the digest too, so the two can be compared. Before publishing, it writes
+   the GitHub release notes with [`scripts/release-notes.mjs`](scripts/release-notes.mjs): the version's `## <version>`
+   section of `CHANGELOG.md`, with relative links pointed at the tag, then the Marketplace link and the digest. A
+   missing or empty section stops the run before anything is published. It publishes that file and attaches the same
+   file, with those notes, to a GitHub release. Concurrent publishing runs are serialized. To preview the notes, run
+   `node scripts/release-notes.mjs`.
 1. When Open VSX publishing is enabled, a separate job publishes the same file there and records its digest. If only
    that job fails, re-run it alone; re-running the whole workflow would try to publish the Marketplace version
    again, which the Marketplace refuses. To add a version that is already on the Marketplace, publish its `.vsix`
