@@ -5,13 +5,11 @@ general procedure and one-time setup; [TEST_PLAN.md](TEST_PLAN.md) names the aut
 the manual checks a regular release needs, the tag-driven publish, and the exit verification, with the decision
 rules for each step.
 
-> **Status:** IN PROGRESS for regular 0.3.7 from pre-release 0.3.6. On 2026-11-24 every expected result of both
-> checks held, but two runs used substitutes (section 12): check A ran in a `code serve-web` window instead of
-> Remote - SSH, and check B's steps 6 and 7 used a saved patch, because vscode.dev now requires a GitHub sign-in.
-> Those two runs as written, the tag, and the exit verification are pending. Regular 0.3.5 was published on
-> 2026-11-11 (section 12).
+> **Status:** COMPLETE for regular 0.3.7, published 2026-11-24 by pushing tag `v0.3.7`. Both checks passed on
+> pre-release 0.3.6 that day, first with two substitute runs and then with those two runs as written
+> (section 12), and the exit verification of 0.3.7 passed.
 >
-> **Current verdict:** none yet.
+> **Current verdict:** PASS.
 >
 > **Controlling corrections:** [2026-11-24 0.3.7 campaign](#2026-11-24---037-campaign): the release commit is
 > made on the tested source commit and tagged there, because `main` moved past that commit.
@@ -66,7 +64,7 @@ The question each campaign answers: is the candidate commit safe to publish on t
 | Its source commit | `6f0f88b1c3c28ab128e331c78ad48c3abe704060` | The commit Publish run `45348403770` built; CI run `45347481251` and CodeQL run `45347481178` passed on it |
 | Its package SHA-256 | `e3d3f4de54507da3b6d9df4cd25d81d1cd34912b99d9cdee92e2e88f0a0ef8ab` | Packaging job `138289840286`, publish job `138290358037`, and the Marketplace download all equal |
 | Remote-check patch | `git format-patch -1 ad2e6ec`, four files, parent `0aef85b` | `git show --stat ad2e6ec` |
-| Release commit and tag | Pending: a release commit on `6f0f88b`, merged into `main`, with tag `v0.3.7` on the release commit | Section 8 |
+| Release commit and tag | `658e11e73703b031e7beb909b5533fcd58caf02f`, tag `v0.3.7`, merged into `main` by `745f94a` | The tag ref resolves to that commit (section 12) |
 
 ## 4. Stop rules
 
@@ -91,9 +89,10 @@ Run **View Patch: Copy Diagnostics** and paste the result into a new untitled ed
 
 A different first line, `Remote:`, or `Platform:` makes the check INVALID. With those right, a different
 `Git version:` on vscode.dev is a FAIL (section 10); in the remote window it means Git is not on the host's
-`PATH`, and the check is INVALID. A version of `0.3.0` means the regular release is installed: choose
-**Switch to Pre-Release Version** in the Extensions view, reload, and run the gate again. An older pre-release
-means the new one has not reached this editor yet: update the extension, reload, and run the gate again.
+`PATH`, and the check is INVALID. The newest regular version, in section 11's last row, means the regular
+release is installed: choose **Switch to Pre-Release Version** in the Extensions view, reload, and run the gate
+again. An older pre-release means the new one has not reached this editor yet: update the extension, reload, and
+run the gate again. If the version still does not change, auto update may be off for that install (section 10).
 
 ## 6. Manual check A: a real remote window
 
@@ -239,8 +238,9 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 
 | Symptom | Meaning | Action |
 | --- | --- | --- |
-| The identity gate shows `0.3.0` | The regular channel is installed | Switch to the pre-release and rerun the gate |
+| The identity gate shows the newest regular version, in section 11's last row | The regular channel is installed | Switch to the pre-release and rerun the gate |
 | The identity gate shows an older pre-release | The new version has not reached this editor | Update the extension, reload, and rerun the gate |
+| The identity gate keeps an older version after switching or updating and reloading | Auto update is off for that install, as after installing from a `.vsix` file or a specific version, so it stays on that version | Right-click View Patch in that window's installed list, choose **Install Another Version**, and pick the version under test; reload and rerun the gate. Turn its **Auto Update** item back on after the campaign |
 | "No Git repository was found" in check A | The patch is outside the clone, or Git is missing | Fix the precondition; the run is INVALID |
 | "No Git repository was found" on vscode.dev, with the gate showing 0.3.4 or later | Regression of the web hunk-only fix | FAIL |
 | `Git version:` on vscode.dev gives another reason, with the gate showing 0.3.4 or later | Regression of the web diagnostics wording | FAIL |
@@ -258,6 +258,7 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | --- | --- | --- | --- | --- | --- | --- |
 | 0.3.0 | regular | 2026-11-10 | `1f89c6c` | not recorded | not recorded | not comparable: rebuilt at publish |
 | 0.3.5 | regular | 2026-11-11 | `82110ca` | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | `661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`, also equal to the GitHub release asset |
+| 0.3.7 | regular | 2026-11-24 | `658e11e` | PASS on 0.3.6, 2026-11-24 | PASS on 0.3.6, 2026-11-24 | `185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`, also equal to the GitHub release asset |
 
 Pre-releases need no manual checks; [RELEASING.md](RELEASING.md#release-channels) lists them.
 
@@ -537,6 +538,81 @@ One finding outside the expected results: a reviewed file's row in **Patch Revie
 from its tooltip, which never says "reviewed" (`src/reviews.ts`). It predates 0.3.6 and does not block this
 release.
 
+### Checks A and B as written: pre-release 0.3.6, 2026-11-24 (PASS)
+
+The two runs that had used substitutes ran as written the same afternoon. The operator worked the editor, and the
+shell steps ran on the host, where View Patch's output was also read. Times are the host's local time, eight
+hours behind Coordinated Universal Time.
+
+**Check A: PASS.** It ran in a new Remote - SSH window on the same Linux host, on Visual Studio Code 1.147.0, with
+a fresh `~/vp-check-a` at `745f94a`, trusted and used by nothing else. A first try in a local window stopped at the
+identity gate (`Remote: (none)`, `Platform: win32 x64`), as section 5 requires. On the host, View Patch had stayed
+on 0.3.5 with auto update turned off (section 10), so 0.3.6 was installed with
+`code --install-extension waddahmoghram.view-patch@0.3.6` at 13:13, and the window was reloaded.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| Preflight | PASS | `check commit present`, no `git status` output, `count: 0`, `in-pack: 512` |
+| 1. Identity gate | PASS | `View Patch 0.3.6`, `Remote: ssh-remote`, `Platform: linux x64; Node 24.22.1`, `Git version: git version 2.56.1`, one trusted workspace folder |
+| 2. Open Patch as Changes | PASS | The four files. Log: `remote-check.patch: complete review r1; base ad2e6ec6e549fae93d5855921b761ae19538f95c^.` |
+| 3. Mark and refresh | PASS | The mark stayed; the log shows the refreshed review as `r1` |
+| 4. Hunks only | PASS | One review, of the same four files, labeled partial context. Log: `remote-check.patch: partial review r2; base (hunks only).` |
+| 5. Close | PASS | The review left **Patch Reviews**; `remote-check.patch` stayed open |
+| After | PASS | No `git status` output; `count: 0`, `in-pack: 512` |
+
+Step 4's review is `r2`, not `r1`: by then `r1` was no longer open, since the operator saw one review and View
+Patch reuses only an open review of the same source. A **Copy Diagnostics** after step 5 logged `Open reviews: 0`.
+
+Under `.git`, only `config` (`vscode-merge-base`) and the commit-graph files changed at 13:00:43, as the first
+check window opened, and GitLens wrote `gk/config` at 13:35:32. All came before View Patch's first review command,
+at 13:38:10. No object, ref, or reflog changed.
+
+**Check B steps 6 and 7: PASS.** They ran in the operator's own vscode.dev session, signed in to GitHub. The
+identity gate showed `View Patch 0.3.6`, `Editor: Visual Studio Code 1.147.0 (vscode.dev)`, `Remote: (none)`,
+`Platform: browser (no Node.js)`, and `Git version: unavailable: VS Code for the Web cannot run Git.`
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| 6. GitHub patch | PASS | **Open Patch as Changes** went straight to hunks only, with no Git warning; the review lists `CMakeLists.txt`, with no `a/` prefix |
+| 7. Reload and reopen | PASS | After marking it and reloading, **Reopen Recent Patch...** reopened the review with `CMakeLists.txt` still reviewed |
+
+The **View Patch** output from step 6, in the browser's local time, one hour ahead of the times above:
+
+```text
+2026-11-24 14:53:18.947 [info] 0001-no-version-script-on-ohos.patch: partial review r1; base (hunks only).
+2026-11-24 14:55:46.418 [info] 0001-no-version-script-on-ohos.patch: VS Code for the Web cannot run Git. Showing the patch's hunks only.
+2026-11-24 14:55:46.482 [info] 0001-no-version-script-on-ohos.patch: partial review r2; base (hunks only).
+```
+
+The first line came from a hunks-only command, which logs no notice. The other two came from **Open Patch as
+Changes**: on the web it chooses hunks only before any Git step, and only the complete-file path can raise "No Git
+repository was found".
+
+### Release and exit verification: 0.3.7, 2026-11-24 (PASS)
+
+Before the push, the section 8 diff gate ran on the release commit `658e11e73703b031e7beb909b5533fcd58caf02f`
+with `tested=6f0f88b`. Its `--stat` listed only `package.json` and `package-lock.json`, and the `package.json`
+diff changed only the `version` line. The merge commit `745f94a5e6e364fbbacccf07307282e40fbee22f` brought the
+release commit into `main`.
+
+Times are Coordinated Universal Time.
+
+| Step | Result | Evidence |
+| --- | --- | --- |
+| Push `3908c05..745f94a` | GitHub `main` at `745f94a`, which also carries the dashboard fix `934cf27` | The repository |
+| CI, CodeQL, and Quality dashboard on `745f94a` | Passed by 20:58:05, before the tag was pushed; the dashboard run uploaded its `dashboard-metrics` artifact | Runs `45484637041`, `45484637151`, and `45486158007` |
+| Tag `v0.3.7` | Points at commit `658e11e73703b031e7beb909b5533fcd58caf02f` | The tag ref |
+| Publish run `45496910322`, started by the tag at 22:01:42 | Every job passed except Open VSX, which was skipped; its verify job ran CI on the tagged commit | The job listing |
+| Package and publish jobs | Both log `view-patch.vsix (regular), SHA-256 185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`. The publish job then logs `Published waddahmoghram.view-patch v0.3.7.` and creates the GitHub release | Jobs `138812507718` and `138813113393` |
+| GitHub release `v0.3.7` | Regular, not a draft, published 22:07:58. Its `view-patch.vsix` is 140,219 bytes, with digest `sha256:185c6d98…639de4`, and its notes are the changelog section with that digest | The release |
+| Section 9 commands with `version=0.3.7`, at about 02:04 on 2026-11-25 | Both downloads gave `185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`, the manifest reads `Version="0.3.7"`, and the pre-release property count printed `0` | Command output |
+| Listing | At 02:04:31 on 2026-11-25, `0.3.7` was listed as a regular version, last updated 22:13:36.043, and was the newest version | A listing query |
+| Shipped code | The Marketplace 0.3.7 package differs from the 0.3.6 package only in `changelog.md`, the `package.json` version line, and the manifest's version and pre-release property; `extension/out` and `extension/dist` are identical | `diff -r` of the two downloads |
+
+Verdict: PASS. Every section 9 check held: the packaging, publishing, Marketplace, and GitHub release digests are
+equal, and the Marketplace version carries no pre-release property. The tag was on the release commit, so the
+package was built from the tested code with the tested packaging tools, as section 8 now requires.
+
 ## 13. Update history
 
 ### 2026-11-11 - Initial record
@@ -619,3 +695,18 @@ release.
   `a/` and `b/`, and vscode.dev asks for a sign-in even for a public repository. The step now tests a file-backed
   GitHub patch; step 4 still tests `i/` and `w/`.
 - Recorded the checks on 0.3.6 in section 12.
+
+### 2026-11-24 - Checks run as written
+
+- Recorded check A in a Remote - SSH window and check B's steps 6 and 7 in a signed-in vscode.dev session, both on
+  0.3.6, in section 12. The record of the substitute runs is kept as written.
+- Changed: section 5 and section 10's first row named `0.3.0` as the version showing that the regular channel is
+  installed, which stopped being the newest regular version when 0.3.5 shipped. They now point to section 11's
+  last row.
+- Added: a section 10 row, and a sentence in section 5, for an install with auto update off, which stays on its
+  version. Check A met one: the remote install had stayed on 0.3.5.
+
+### 2026-11-24 - 0.3.7 released
+
+- Recorded the release and its exit verification in section 12, filled in section 11's 0.3.7 row and section 3's
+  release row, and set the status to COMPLETE with the verdict PASS.
