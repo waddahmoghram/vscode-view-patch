@@ -120,11 +120,15 @@ suite('View Patch commands', () => {
     test('filters paths in the persistent review checklist', async () => {
         await open(patchFile());
         const root = api.reviews.tree.getChildren()[0];
+        const title = api.reviews.view.description;
+        assert.match(title ?? '', /^v\d+\.\d+\.\d+ · local (Windows|macOS|Linux)$/);
         await vscode.commands.executeCommand('viewPatch.filter', 'src/');
         const filtered = api.reviews.tree.getChildren(root).filter(node => node.kind === 'file');
         assert.deepStrictEqual(filtered.map(nodeLabel), ['src/app.ts']);
+        assert.strictEqual(api.reviews.view.description, `${title} · filter: src/`);
         await vscode.commands.executeCommand('viewPatch.clearFilter');
         assert.strictEqual(api.reviews.tree.getChildren(root).filter(node => node.kind === 'file').length, 3);
+        assert.strictEqual(api.reviews.view.description, title, 'clearing the filter must keep the version and host');
     });
 
     test('offers refresh on save without silently replacing the reviewed snapshot', async () => {

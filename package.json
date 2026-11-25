@@ -272,7 +272,7 @@
             "title": "No repository? View hunks only",
             "description": "Hunks show only the patch's lines, not complete files. Right-click an open review to switch modes without selecting its source again.\n[View Patch Hunks Only](command:viewPatch.openHunks)",
             "media": { "markdown": "media/walkthrough/hunks.md" },
-            "completionEvents": ["onCommand:viewPatch.openHunks"]
+            "completionEvents": ["onCommand:viewPatch.openHunks", "onCommand:viewPatch.showHunks"]
           },
           {
             "id": "viewPatch.step.checklist",
@@ -391,47 +391,47 @@
         },
         {
           "command": "viewPatch.refresh",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "inline@1"
         },
         {
           "command": "viewPatch.changeBase",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "review@1"
         },
         {
           "command": "viewPatch.showHunks",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review.complete",
           "group": "mode@1"
         },
         {
           "command": "viewPatch.showCompleteFiles",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review.partial && !isWeb",
           "group": "mode@2"
         },
         {
           "command": "viewPatch.compareWith",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "review@2"
         },
         {
           "command": "viewPatch.exportSummary",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "review@3"
         },
         {
           "command": "viewPatch.markAllReviewed",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "review@4"
         },
         {
           "command": "viewPatch.clearReviewed",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "review@5"
         },
         {
           "command": "viewPatch.closeReview",
-          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "when": "view == viewPatch.reviews && viewItem =~ /^viewPatch\\.review\\./",
           "group": "inline@2"
         }
       ]

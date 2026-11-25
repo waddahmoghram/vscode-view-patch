@@ -4,14 +4,17 @@
 
 Pre-release.
 
-- Patch Reviews now shows the loaded extension version and whether it runs locally, on a remote host, or in a
-  browser.
-  **Show Environment** displays that information without copying diagnostics.
+- The Patch Reviews title now shows the loaded extension version and where it runs, such as
+  `v0.3.8 · remote Linux`, alongside any path filter.
+  **Show Environment** says the same in a sentence without copying diagnostics.
 - **Show View Patch Output** opens the correct log channel from the Command Palette or the view's **...** menu.
 - **Show Hunks Only for Review** and **Show Complete Files for Review** use the selected review's original patch.
   They reuse its review and retain its repository/base choice while it stays open.
-  A failed switch leaves the existing review available, and checkmarks survive only for unchanged representations.
-- File screen-reader labels announce reviewed/unreviewed state and partial context; review labels include counts.
+  Each review's menu offers only the switch that applies, and none in VS Code for the Web.
+  Files listed in both views keep their reviewed marks while the patch is unchanged.
+  A failed switch leaves the existing review available.
+- Screen-reader labels give each file's change in words, such as "modified" or "renamed from", and say "reviewed",
+  "not reviewed", and "partial context"; review labels include counts.
 - The existing first-use walkthrough explains local versus remote windows, review modes, checkmarks, and which
   saved sources can be reopened after a reload.
 

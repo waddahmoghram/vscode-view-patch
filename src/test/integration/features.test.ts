@@ -69,15 +69,21 @@ suite('Review workflow commands', () => {
     test('shows the running environment without copying diagnostics or opening a review', async () => {
         await vscode.env.clipboard.writeText('clipboard before showing the environment');
         const text = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
-        assert.match(text, /^View Patch \d+\.\d+\.\d+\nRunning on: local (Windows|macOS|Linux)/);
+        assert.match(text, /^View Patch \d+\.\d+\.\d+ is running on this computer \((Windows|macOS|Linux)\)\.$/);
         assert.strictEqual(await vscode.env.clipboard.readText(), 'clipboard before showing the environment');
         assert.strictEqual(api.reviews.list().length, 0);
+        assert.match(api.reviews.view.description ?? '', /^v\d+\.\d+\.\d+ · local (Windows|macOS|Linux)$/);
+        assert.ok(!api.reviews.view.message, "a view message would hide the empty view's welcome buttons");
     });
 
     test('switches the selected review between modes without choosing the active patch or losing its target', async () => {
         const uri = patchFile();
         const first = await open(uri);
-        await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: first.id });
+        assert.strictEqual(rootOf(first.id)?.contextValue, 'viewPatch.review.complete');
+        const valueIndex = first.resources.findIndex(([label]) => label.endsWith('/src/value.txt'));
+        await vscode.commands.executeCommand('viewPatch.toggleReviewed', {
+            reviewId: first.id, sectionKey: 'combined', fileIndex: valueIndex,
+        });
         const decoy = await open(patchFile());
         await settings().update('repositories', [], vscode.ConfigurationTarget.Global);
         try {
@@ -87,8 +93,8 @@ suite('Review workflow commands', () => {
             assert.strictEqual(partial.mode, 'partial');
             assert.strictEqual(partial.repo, undefined, 'a hunk-only review must not claim complete files');
             assert.match(partial.title, /partial context/);
-            assert.strictEqual(partial.sections[0].reviewed, 0,
-                'reviewing complete files must not mark their partial representation reviewed');
+            assert.strictEqual(partial.sections[0].reviewed, 1, 'switching an unchanged patch must keep its marks');
+            assert.strictEqual(rootOf(first.id)?.contextValue, 'viewPatch.review.partial');
             assert.strictEqual(api.reviews.list().find(review => review.id === decoy.id)?.mode, 'complete');
             await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: first.id });
             const complete = await vscode.commands.executeCommand<ShownPatch>(
@@ -98,7 +104,8 @@ suite('Review workflow commands', () => {
             assert.strictEqual(complete.repo, first.repo,
                 'the chosen repository must survive even without repository candidates');
             assert.strictEqual(complete.base, first.base);
-            assert.strictEqual(complete.sections[0].reviewed, 0);
+            assert.strictEqual(complete.sections[0].reviewed, 2, 'marks made on the hunks must carry back');
+            assert.strictEqual(rootOf(first.id)?.contextValue, 'viewPatch.review.complete');
             assert.doesNotMatch(complete.title, /partial context/);
             const again = await vscode.commands.executeCommand<ShownPatch>(
                 'viewPatch.showCompleteFiles', { reviewId: first.id });
@@ -109,6 +116,19 @@ suite('Review workflow commands', () => {
         } finally {
             await settings().update('repositories', [repo], vscode.ConfigurationTarget.Global);
         }
+    });
+
+    test('clears checkmarks when the patch changed before a mode switch', async () => {
+        const uri = patchFile();
+        const first = await open(uri);
+        await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: first.id });
+        writeFileSync(uri.fsPath, formatPatch(repo, commit).replace('+two', '+three'));
+        const partial = await vscode.commands.executeCommand<ShownPatch>(
+            'viewPatch.showHunks', { reviewId: first.id });
+        assert.strictEqual(partial.id, first.id);
+        assert.strictEqual(partial.mode, 'partial');
+        assert.strictEqual(partial.sections[0].reviewed, 0, 'a mark must not outlive a change to the patch');
+        assert.match((await readSide(partial, '/src/value.txt')).after ?? '', /three/);
     });
 
     test('a failed complete-file switch keeps the partial review available', async () => {
@@ -266,6 +286,7 @@ suite('Review workflow commands', () => {
         const sides = await readSide(shown, '/src/value.txt');
         assert.strictEqual(sides.before, 'two\n');
         assert.strictEqual(sides.after, 'three\n');
+        assert.strictEqual(rootOf(shown.id)?.contextValue, 'viewPatch.review.pinned');
         await assert.rejects(api.reviews.switchMode({ reviewId: shown.id }, 'partial'),
             /Commit and version-comparison reviews are already complete-file snapshots/);
         assert.strictEqual(api.reviews.list().find(review => review.id === shown.id)?.mode, 'complete');
@@ -507,6 +528,11 @@ suite('Review workflow commands', () => {
 
 function settings(): vscode.WorkspaceConfiguration {
     return vscode.workspace.getConfiguration('viewPatch');
+}
+
+function rootOf(reviewId: string): vscode.TreeItem | undefined {
+    const extension = vscode.extensions.getExtension<ViewPatchApi>('waddahmoghram.view-patch');
+    return extension?.exports.reviews.tree.getChildren().find(node => node.reviewId === reviewId);
 }
 
 interface ReportPrompt {

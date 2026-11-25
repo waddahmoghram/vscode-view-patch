@@ -54,8 +54,10 @@ This mode needs neither Git nor workspace trust.
 For an open patch review, right-click its name in **Patch Reviews** and choose **Show Hunks Only for Review** or
 **Show Complete Files for Review**.
 These actions reuse that review's original source, not a different patch in the active editor.
-They retain its repository and base choice while it stays open, and keep reviewed marks only for representations
-whose contents and metadata are unchanged.
+They retain its repository and base choice while it stays open.
+While the patch itself is unchanged, files listed in both views keep their reviewed marks; if the patch changed,
+its marks are cleared.
+Each review's menu offers only the switch that applies, and VS Code for the Web offers no complete files.
 Commit and version-comparison reviews cannot switch modes.
 Complete files still need Git, a matching repository, and workspace trust; a failed switch keeps the existing view.
 
@@ -102,14 +104,16 @@ encoded diffs review normally. Unsupported encodings and multipart mail are reje
 Expand **Patch Reviews** in the Explorer, or run **View Patch: Show Patch Reviews**.
 Expand **Review Details** for the selected patch's subject, author, date, snapshot identifier, and detailed counts.
 The panel divider can be dragged upward to give a large checklist more room.
-The view shows the loaded extension version and **Running on: local**, **remote**, or **browser**.
-**Show Environment** in its **...** menu displays the same information without copying diagnostics.
+The view's title shows the loaded extension version and where it runs, for example `v0.3.8 · local Windows`,
+`v0.3.8 · remote Linux`, or `v0.3.8 · browser`, which tells a local window from a remote one or the browser.
+**Show Environment** in its **...** menu says the same in a sentence, without copying diagnostics.
 
 - See the repository, base, subject, author, date, and added/modified/deleted/renamed file counts.
 - Filter old and new paths with the filter button.
 - Toggle each file's **reviewed** checkmark. Selecting a file opens its individual diff. **Mark All Reviewed**
   and **Clear Reviewed Checkmarks** work on the whole review, and the view's badge counts unreviewed files.
-  Screen-reader labels include reviewed/unreviewed state and identify partial context.
+  Screen-reader labels give each file's change in words, whether it is reviewed, and whether it shows partial
+  context.
 - **Next/Previous Unreviewed File** walk what is left; the `viewPatch.markReviewedOnOpen` setting checks files
   off as you open them.
 - **Copy Review Summary as Markdown** copies the repository, base, file list, per-file line counts, and

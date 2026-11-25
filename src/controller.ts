@@ -2,6 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { contentFingerprint, PatchDocuments, SCHEME, snapshotId, SnapshotFile } from './documents';
+import { HostSummary, hostSummary } from './environment';
 import { Git } from './git';
 import {
     DEFAULT_MAX_CACHE_BYTES,
@@ -15,12 +16,15 @@ import {
     positiveLimit,
     throwIfAborted,
 } from './operations';
-import { AppliedPatch, applyPatch, ChangeStatus, commitChanges, compareApplied, FileDiffInput, fileDiffStats, looksLikePatch, mergeChanges, patchCommit, SkippedChange, unifiedFileDiff } from './patch';
+import { AppliedPatch, applyPatch, commitChanges, compareApplied, FileDiffInput, fileDiffStats, looksLikePatch, mergeChanges, patchCommit, SkippedChange, unifiedFileDiff } from './patch';
 import { hasCombinedDiff, HunkFile, parseCombinedParts, parseHunks, PatchMetadata, splitPatchMessages } from './patchText';
 import { ISSUE_FORM_URL, problemReport, redactPaths } from './problemReport';
 import { findRepositories, hasCommit, isRevision, parentOf, PatchTarget, resolvePatch, topLevel } from './repositories';
 import {
-    preserveReviewed,
+    carryReviewed,
+    COMMIT_SCHEME,
+    COMPARE_SCHEME,
+    isPinned,
     primarySection,
     Review,
     ReviewData,
@@ -31,6 +35,7 @@ import {
     ReviewSource,
     ReviewTree,
     reviewTitle,
+    STATUS_WORDS,
 } from './reviews';
 import { assembleSeries } from './seriesInput';
 
@@ -89,8 +94,6 @@ interface RecentPatch {
 
 const RECENT_KEY = 'recentPatches';
 const RECENT_LIMIT = 25;
-const COMPARE_SCHEME = 'view-patch-compare';
-const COMMIT_SCHEME = 'view-patch-commit';
 const REPORT_SCHEME = 'view-patch-report';
 
 const CHOOSE = 'Choose Repository and Base...';
@@ -111,21 +114,18 @@ function extensionVersion(): string {
     return typeof version === 'string' ? version : '(unknown version)';
 }
 
-function environmentLabel(): string {
-    if (!hostRunsGit()) {
-        return 'Running on: browser (no Node.js; Git unavailable)';
-    }
-    const platform = process.platform === 'win32' ? 'Windows'
-        : process.platform === 'darwin' ? 'macOS' : process.platform === 'linux' ? 'Linux' : process.platform;
-    return `Running on: ${vscode.env.remoteName ? 'remote' : 'local'} ${platform}`
-        + (vscode.env.remoteName ? ` (${vscode.env.remoteName})` : '');
+function host(): HostSummary {
+    const runsNode = hostRunsGit();
+    return hostSummary({
+        runsNode, platform: runsNode ? process.platform : undefined, remoteName: vscode.env.remoteName,
+    });
 }
 
 export class ReviewController implements vscode.Disposable {
     readonly documents = new PatchDocuments();
     private readonly reviews = new Map<string, Review>();
     readonly tree = new ReviewTree(this.reviews);
-    private readonly view: vscode.TreeView<ReviewNode>;
+    readonly view: vscode.TreeView<ReviewNode>;
     private readonly titles = new Map<string, Set<string>>();
     private readonly pending = new Map<string, Promise<ShownPatch | undefined>>();
     private readonly aborters = new Set<AbortController>();
@@ -151,8 +151,7 @@ export class ReviewController implements vscode.Disposable {
                 },
             },
         });
-        this.view.description = `v${extensionVersion()}`;
-        this.view.message = environmentLabel();
+        this.updateDescription();
         this.subscriptions.push(
             this.view,
             this.tree,
@@ -261,7 +260,7 @@ export class ReviewController implements vscode.Disposable {
 
     async switchMode(reference: unknown, mode: ReviewData['mode']): Promise<ShownPatch | undefined> {
         const review = this.find(reference);
-        if (review.source.uri.scheme === COMPARE_SCHEME || review.source.uri.scheme === COMMIT_SCHEME) {
+        if (isPinned(review)) {
             throw new Error('Commit and version-comparison reviews are already complete-file snapshots.'
                 + ' Open a patch file to switch between complete files and hunks only.');
         }
@@ -645,7 +644,7 @@ export class ReviewController implements vscode.Disposable {
     }
 
     showEnvironment(): string {
-        const text = `View Patch ${extensionVersion()}\n${environmentLabel()}`;
+        const text = `View Patch ${extensionVersion()} is running ${host().where}.`;
         void vscode.window.showInformationMessage(text);
         return text;
     }
@@ -814,7 +813,7 @@ export class ReviewController implements vscode.Disposable {
             return;
         }
         this.tree.filter = text.trim();
-        this.view.description = this.tree.filter ? `filter: ${this.tree.filter}` : undefined;
+        this.updateDescription();
         await vscode.commands.executeCommand('setContext', 'viewPatch.filtered', this.tree.filter !== '');
         this.refreshTree();
     }
@@ -1074,7 +1073,7 @@ export class ReviewController implements vscode.Disposable {
             ...data,
             id,
             title: reviewTitle(data.source.name, Number(id.slice(1)), data.mode),
-            reviewed: previous ? preserveReviewed(previous, data) : this.storedReviewed(data),
+            reviewed: previous ? carryReviewed(previous, data) : this.storedReviewed(data),
             completeTarget: data.mode === 'complete' && data.repo && data.base
                 ? { repo: data.repo, base: data.base } : previous?.completeTarget,
             section: section.key,
@@ -1253,6 +1252,15 @@ export class ReviewController implements vscode.Disposable {
         }
         this.refreshTree();
         void vscode.commands.executeCommand('setContext', 'viewPatch.hasReviews', this.reviews.size > 0);
+    }
+
+    /**
+     * The title tells windows apart by the loaded version and where it runs, then shows any filter. It is not the
+     * view's message: VS Code hides the empty view's welcome buttons while a message is set.
+     */
+    private updateDescription(): void {
+        const filter = this.tree.filter ? ` · filter: ${this.tree.filter}` : '';
+        this.view.description = `v${extensionVersion()} · ${host().short}${filter}`;
     }
 
     private refreshTree(): void {
@@ -1598,10 +1606,7 @@ function fileStatusLabel(file: SnapshotFile): string {
     if (file.kind === 'metadata' && file.note) {
         return file.note;
     }
-    const labels: Record<ChangeStatus, string> = {
-        A: 'added', C: 'copied', D: 'deleted', M: 'modified', R: 'renamed', T: 'type changed',
-    };
-    return file.note ? `${labels[file.status]} (${file.note})` : labels[file.status];
+    return file.note ? `${STATUS_WORDS[file.status]} (${file.note})` : STATUS_WORDS[file.status];
 }
 
 function isRecentPatch(value: unknown): value is RecentPatch {

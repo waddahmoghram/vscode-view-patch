@@ -1,7 +1,15 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { contentFingerprint, isDisplayableText, SnapshotFile, SnapshotSection } from './documents';
+import type { ChangeStatus } from './patch';
 import type { PatchMetadata } from './patchText';
+
+export const COMPARE_SCHEME = 'view-patch-compare';
+export const COMMIT_SCHEME = 'view-patch-commit';
+
+export const STATUS_WORDS: Readonly<Record<ChangeStatus, string>> = {
+    A: 'added', C: 'copied', D: 'deleted', M: 'modified', R: 'renamed', T: 'type changed',
+};
 
 export interface ReviewSource {
     readonly uri: vscode.Uri;
@@ -103,7 +111,7 @@ export class ReviewTree implements vscode.TreeDataProvider<ReviewNode>, vscode.D
     private root(review: Review): ReviewNode {
         const root = new ReviewNode('review', review.id, review.source.name);
         root.id = review.id;
-        root.contextValue = 'viewPatch.review';
+        root.contextValue = isPinned(review) ? 'viewPatch.review.pinned' : `viewPatch.review.${review.mode}`;
         root.iconPath = new vscode.ThemeIcon(review.mode === 'partial' ? 'warning' : 'diff-multiple');
         const sections = summarySections(review);
         const files = sections.flatMap(section => section.files);
@@ -116,8 +124,14 @@ export class ReviewTree implements vscode.TreeDataProvider<ReviewNode>, vscode.D
             + `${review.sourceChanged ? '; source changed' : ''}`;
         root.tooltip = `${review.title}\n${review.mode === 'partial' ? 'Partial context only' : review.repo ?? ''}`;
         root.accessibilityInformation = {
-            label: `${review.source.name}, ${root.description}, `
-                + (review.mode === 'partial' ? 'hunks only, partial context' : 'complete files'),
+            label: [
+                review.source.name,
+                ...series > 1 ? [`${series} patches`] : [],
+                `${files.length} ${files.length === 1 ? 'change' : 'changes'}`,
+                `${checked} reviewed`,
+                ...review.sourceChanged ? ['source changed'] : [],
+                review.mode === 'partial' ? 'hunks only, partial context' : 'complete files',
+            ].join(', '),
         };
         root.command = { command: 'viewPatch.showReview', title: 'Show Review', arguments: [{ reviewId: review.id }] };
         return root;
@@ -202,14 +216,9 @@ export class ReviewTree implements vscode.TreeDataProvider<ReviewNode>, vscode.D
             item.description = `${file.status}${reviewed ? ' | reviewed' : ''}${fileDetail(file)}`;
             item.contextValue = reviewed ? 'viewPatch.file.reviewed' : 'viewPatch.file.unreviewed';
             item.iconPath = new vscode.ThemeIcon(reviewed ? 'pass' : 'circle-outline');
-            const name = file.oldPath === file.newPath ? file.newPath : `${file.oldPath} -> ${file.newPath}`;
-            const detail = file.note ?? fileDetail(file).replace(/^ \| /, '');
-            item.tooltip = `${name}\n${detail}`;
-            item.accessibilityInformation = {
-                label: `${name}, ${file.status}, ${reviewed ? 'reviewed' : 'unreviewed'}`
-                    + (detail ? `, ${detail}` : '')
-                    + (review.mode === 'partial' && !detail.includes('partial context') ? ', partial context' : ''),
-            };
+            item.tooltip = `${file.oldPath === file.newPath ? file.newPath : `${file.oldPath} -> ${file.newPath}`}`
+                + `\n${file.note ?? fileDetail(file).replace(/^ \| /, '')}`;
+            item.accessibilityInformation = { label: spokenFile(file, reviewed, review.mode === 'partial') };
             item.command = {
                 command: 'viewPatch.openFile',
                 title: 'Open File Difference',
@@ -235,6 +244,23 @@ function summarySections(review: ReviewData): readonly ReviewSection[] {
 
 export function reviewFileKey(section: string, file: SnapshotFile): string {
     return `${section}\0${file.oldPath}\0${file.newPath}`;
+}
+
+/** Commit and version-comparison reviews are complete snapshots with no patch text to view another way. */
+export function isPinned(review: ReviewData): boolean {
+    return review.source.uri.scheme === COMMIT_SCHEME || review.source.uri.scheme === COMPARE_SCHEME;
+}
+
+/**
+ * The checkmarks a rebuilt review keeps. Switching an unchanged patch between complete files and hunks keeps the
+ * marks of the files both views list; otherwise only files whose change is exactly unchanged keep theirs.
+ */
+export function carryReviewed(previous: Review, next: ReviewData): Set<string> {
+    if (previous.mode === next.mode || previous.digest !== next.digest) {
+        return preserveReviewed(previous, next);
+    }
+    const keys = new Set(next.sections.flatMap(section => section.files.map(file => reviewFileKey(section.key, file))));
+    return new Set([...previous.reviewed].filter(key => keys.has(key)));
 }
 
 export function preserveReviewed(previous: Review, next: ReviewData): Set<string> {
@@ -289,6 +315,27 @@ function fileDetail(file: SnapshotFile): string {
     const mode = file.oldMode && file.newMode && file.oldMode !== file.newMode
         ? ` | mode ${file.oldMode} -> ${file.newMode}` : '';
     return renamed + mode;
+}
+
+/** A file row's screen-reader label, in words instead of the row's status letter, arrows, and separators. */
+function spokenFile(file: SnapshotFile, reviewed: boolean, partial: boolean): string {
+    const status = STATUS_WORDS[file.status];
+    const parts = [file.newPath, file.oldPath === file.newPath ? status : `${status} from ${file.oldPath}`];
+    parts.push(reviewed ? 'reviewed' : 'not reviewed');
+    const sides = [file.before, file.after].filter((side): side is Buffer => side !== undefined);
+    if (file.note && file.note !== 'partial context') {
+        parts.push(file.note);
+    } else if (file.kind === 'metadata') {
+        parts.push('metadata only');
+    } else if (sides.some(side => !isDisplayableText(side))) {
+        parts.push(`binary, ${file.before?.length ?? 0} to ${file.after?.length ?? 0} bytes`);
+    } else if (file.oldMode && file.newMode && file.oldMode !== file.newMode) {
+        parts.push(`mode ${file.oldMode} to ${file.newMode}`);
+    }
+    if (partial) {
+        parts.push('partial context');
+    }
+    return parts.join(', ');
 }
 
 function fileSignature(file: SnapshotFile): string {

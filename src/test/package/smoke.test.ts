@@ -94,7 +94,7 @@ suite('Installed package', () => {
         assert.strictEqual(complete.mode, 'complete');
         assert.deepStrictEqual(await readSides(complete), [['apples\npears\n', 'apples\nplums\n']]);
         const environment = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
-        assert.match(environment, /Running on: local (Windows|macOS|Linux)/);
+        assert.match(environment, /^View Patch \d+\.\d+\.\d+ is running on this computer \((Windows|macOS|Linux)\)\.$/);
         await vscode.commands.executeCommand('viewPatch.showOutput');
         const reviews = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.listReviews');
         assert.deepStrictEqual(reviews.map(review => review.id).sort(), [shown[0].id, other[0].id].sort());

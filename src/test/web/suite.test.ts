@@ -116,8 +116,11 @@ suite('View Patch in the web extension host', () => {
 
     test('shows the browser environment and declines complete-file switching without losing the review', async () => {
         const text = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
-        check(text.includes('Running on: browser (no Node.js; Git unavailable)'),
+        check(text.includes(' is running in the browser, which cannot run Git, so patches open as hunks only.'),
             `the environment must explain browser capabilities: ${text}`);
+        const title = api.reviews.view.description ?? '';
+        check(/^v\d+\.\d+\.\d+ · browser$/.test(title), `the view title must name the browser: ${title}`);
+        check(!api.reviews.view.message, "a view message would hide the empty view's welcome buttons");
         const [partial] = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openSample');
         const shown = await vscode.commands.executeCommand<ShownPatch>(
             'viewPatch.showHunks', { reviewId: partial.id });
@@ -136,10 +139,12 @@ suite('View Patch in the web extension host', () => {
         check(file, 'the review must have a file row');
         const label = file.accessibilityInformation?.label;
         check(typeof label === 'string', 'the file must have a spoken label');
-        check(label.includes('unreviewed'), 'the spoken label must include state');
-        check(label.includes('partial context'), 'the spoken label must include mode');
+        check(label === 'src/greeting.ts, modified, not reviewed, partial context', `unexpected spoken label: ${label}`);
+        check(root.contextValue === 'viewPatch.review.partial', `unexpected review context: ${root.contextValue}`);
         await vscode.commands.executeCommand('viewPatch.toggleReviewed', file);
         const marked = api.reviews.tree.getChildren(root).find(node => node.kind === 'file');
-        check(marked?.accessibilityInformation?.label.includes(', reviewed'), 'the spoken state must update');
+        const markedLabel = marked?.accessibilityInformation?.label;
+        check(markedLabel === 'src/greeting.ts, modified, reviewed, partial context',
+            `the spoken state must update: ${markedLabel}`);
     });
 });

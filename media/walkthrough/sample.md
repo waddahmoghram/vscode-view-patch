@@ -1,9 +1,9 @@
 # Try the built-in sample
 
-Start with **View Patch: Show Environment** or look above the file list in **Patch Reviews**.
-The view shows the loaded extension version and whether it is running on your local computer, a remote host, or
-in a browser.
-No diagnostics are copied.
+Start by checking the **Patch Reviews** title.
+It shows the loaded extension version and where View Patch runs, for example `v0.3.8 · local Windows`,
+`v0.3.8 · remote Linux`, or `v0.3.8 · browser`.
+**View Patch: Show Environment** says the same in a sentence, without copying any diagnostics.
 
 **View Patch: Open Sample Patch** opens a small two-file demo as a partial-context review.
 It needs no repository and changes no repository files.

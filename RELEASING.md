@@ -171,13 +171,13 @@ If a run fails after publishing has started, inspect its publishing step and the
 If source changes are needed after publication, use a new version.
 
 Before promoting this candidate to a regular release, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.8` for the runtime identity gate rather than the old campaign's version.
-Also check the environment/version shown above Patch Reviews in local, remote, and browser windows, and open the
-log with **Show View Patch Output**.
+Also check the version and host in the Patch Reviews title in local, remote, and browser windows, that the empty
+view still shows its welcome buttons, and open the log with **Show View Patch Output**.
 With a different patch active, right-click the intended review and switch it to hunks only and back to complete
-files; it should reuse that review, keep its target, and leave the other review untouched.
-In the browser, the complete-file action must explain that Git is unavailable and keep the partial review open.
-Use a screen reader to confirm that file labels announce reviewed/unreviewed state as it changes, and partial
-context; automated label checks do not prove actual speech output.
+files; it should reuse that review, keep its target and reviewed marks, and leave the other review untouched.
+In the browser, the review menu must not offer complete files.
+Use a screen reader to confirm that file labels say "reviewed" or "not reviewed" as the mark changes, and
+"partial context"; automated label checks do not prove actual speech output.
 Automated tests do not replace these manual checks.
 
 ## Checking a package locally

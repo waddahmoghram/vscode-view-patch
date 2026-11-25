@@ -180,18 +180,23 @@ suite('Review snapshots', () => {
             id: 'r1', title: 'Review', section: 'combined', opening: false, seen: true, reviewed: new Set(),
         };
         const tree = new ReviewTree(new Map([[review.id, review]]));
+        const spoken = () => {
+            const root = tree.getChildren()[0];
+            const row = tree.getChildren(root).find(node => node.kind === 'file');
+            return [root.accessibilityInformation?.label, row?.accessibilityInformation?.label, root.contextValue];
+        };
         try {
-            const firstRoot = tree.getChildren()[0];
-            const first = tree.getChildren(firstRoot).find(node => node.kind === 'file');
-            assert.match(first?.accessibilityInformation?.label ?? '', /old\.txt -> new\.txt.*unreviewed/);
-            assert.match(first?.accessibilityInformation?.label ?? '', /rename without edits.*partial context/);
-            assert.match(firstRoot.accessibilityInformation?.label ?? '', /0 reviewed.*partial context/);
+            assert.deepStrictEqual(spoken(), [
+                'example.patch, 1 change, 0 reviewed, hunks only, partial context',
+                'new.txt, renamed from old.txt, not reviewed, rename without edits, partial context',
+                'viewPatch.review.partial',
+            ]);
             review.reviewed.add(reviewFileKey('combined', renamed));
-            const markedRoot = tree.getChildren()[0];
-            const marked = tree.getChildren(markedRoot).find(node => node.kind === 'file');
-            assert.match(marked?.accessibilityInformation?.label ?? '', /old\.txt -> new\.txt, R, reviewed/);
-            assert.doesNotMatch(marked?.accessibilityInformation?.label ?? '', /unreviewed/);
-            assert.match(markedRoot.accessibilityInformation?.label ?? '', /1 reviewed/);
+            assert.deepStrictEqual(spoken(), [
+                'example.patch, 1 change, 1 reviewed, hunks only, partial context',
+                'new.txt, renamed from old.txt, reviewed, rename without edits, partial context',
+                'viewPatch.review.partial',
+            ]);
         } finally {
             tree.dispose();
         }

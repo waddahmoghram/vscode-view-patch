@@ -4,7 +4,8 @@ Use the window that can reach the repository.
 For a local repository, use the local desktop window.
 For a repository on another machine, connect Visual Studio Code through Secure Shell (SSH) and install View Patch
 on that host.
-Check **Show Environment** before opening the patch; switching windows can also change the loaded extension version.
+Check the **Patch Reviews** title or **Show Environment** before opening the patch; switching windows can also change
+the loaded extension version.
 In the browser, **Open Patch as Changes** opens hunks only because the browser cannot run Git.
 
 Any of these work:
