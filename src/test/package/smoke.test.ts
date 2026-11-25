@@ -82,6 +82,22 @@ suite('Installed package', () => {
         assert.strictEqual(canonical(shown[0].repo), canonical(repo));
         assert.strictEqual(shown[0].base, `${commit}^`);
         assert.deepStrictEqual(await readSides(shown[0]), [['apples\npears\n', 'apples\nplums\n']]);
+        const other = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openSample');
+        const partial = await vscode.commands.executeCommand<ShownPatch>(
+            'viewPatch.showHunks', { reviewId: shown[0].id });
+        assert.strictEqual(partial.id, shown[0].id);
+        assert.strictEqual(partial.mode, 'partial');
+        assert.match((await readSides(partial))[0][0] ?? '', /partial/i);
+        const complete = await vscode.commands.executeCommand<ShownPatch>(
+            'viewPatch.showCompleteFiles', { reviewId: partial.id });
+        assert.strictEqual(complete.id, shown[0].id);
+        assert.strictEqual(complete.mode, 'complete');
+        assert.deepStrictEqual(await readSides(complete), [['apples\npears\n', 'apples\nplums\n']]);
+        const environment = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
+        assert.match(environment, /Running on: local (Windows|macOS|Linux)/);
+        await vscode.commands.executeCommand('viewPatch.showOutput');
+        const reviews = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.listReviews');
+        assert.deepStrictEqual(reviews.map(review => review.id).sort(), [shown[0].id, other[0].id].sort());
         assert.deepStrictEqual(repositoryState(repo), before);
     });
 

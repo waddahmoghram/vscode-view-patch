@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.8
+
+Pre-release.
+
+- Patch Reviews now shows the loaded extension version and whether it runs locally, on a remote host, or in a
+  browser.
+  **Show Environment** displays that information without copying diagnostics.
+- **Show View Patch Output** opens the correct log channel from the Command Palette or the view's **...** menu.
+- **Show Hunks Only for Review** and **Show Complete Files for Review** use the selected review's original patch.
+  They reuse its review and retain its repository/base choice while it stays open.
+  A failed switch leaves the existing review available, and checkmarks survive only for unchanged representations.
+- File screen-reader labels announce reviewed/unreviewed state and partial context; review labels include counts.
+- The existing first-use walkthrough explains local versus remote windows, review modes, checkmarks, and which
+  saved sources can be reopened after a reload.
+
 ## 0.3.7
 
 - The regular release of pre-release [0.3.6](CHANGELOG.md#036), with the same code. New on the regular channel:

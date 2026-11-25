@@ -2,7 +2,7 @@
   "name": "view-patch",
   "displayName": "View Patch",
   "description": "Review patches and patch series side by side, with complete Git-backed files or explicit repository-free hunk views.",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "publisher": "waddahmoghram",
   "author": "Waddah Moghram",
   "license": "MIT",
@@ -87,6 +87,18 @@
         "title": "Change Repository and Base...",
         "category": "View Patch",
         "icon": "$(git-compare)"
+      },
+      {
+        "command": "viewPatch.showHunks",
+        "title": "Show Hunks Only for Review",
+        "category": "View Patch",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "viewPatch.showCompleteFiles",
+        "title": "Show Complete Files for Review",
+        "category": "View Patch",
+        "icon": "$(diff-multiple)"
       },
       {
         "command": "viewPatch.toggleReviewed",
@@ -188,6 +200,17 @@
         "category": "View Patch"
       },
       {
+        "command": "viewPatch.showEnvironment",
+        "title": "Show Environment",
+        "category": "View Patch"
+      },
+      {
+        "command": "viewPatch.showOutput",
+        "title": "Show View Patch Output",
+        "category": "View Patch",
+        "icon": "$(output)"
+      },
+      {
         "command": "viewPatch.reportProblem",
         "title": "Report a Problem...",
         "category": "View Patch"
@@ -221,7 +244,7 @@
     "viewsWelcome": [
       {
         "view": "viewPatch.reviews",
-        "contents": "Open a patch to review it here.\n[Open Patch as Changes](command:viewPatch.open)\n[View Hunks Only](command:viewPatch.openHunks)\n[Open Sample Patch](command:viewPatch.openSample)\n[Review a Commit...](command:viewPatch.reviewCommit)"
+        "contents": "Open a patch to review it here.\n[Open Patch as Changes](command:viewPatch.open)\n[View Hunks Only](command:viewPatch.openHunks)\n[Open Sample Patch](command:viewPatch.openSample)\n[Review a Commit...](command:viewPatch.reviewCommit)\n[Show Environment](command:viewPatch.showEnvironment)\n[Show View Patch Output](command:viewPatch.showOutput)"
       }
     ],
     "walkthroughs": [
@@ -233,28 +256,28 @@
           {
             "id": "viewPatch.step.sample",
             "title": "Try the built-in sample",
-            "description": "One command opens a known-good demo patch - no repository or setup needed.\n[Open Sample Patch](command:viewPatch.openSample)",
+            "description": "Check the running version and whether this window uses the local computer, a remote host, or the browser. Then try the two-file partial-context demo.\n[Show Environment](command:viewPatch.showEnvironment)\n[Open Sample Patch](command:viewPatch.openSample)",
             "media": { "markdown": "media/walkthrough/sample.md" },
             "completionEvents": ["onCommand:viewPatch.openSample"]
           },
           {
             "id": "viewPatch.step.open",
             "title": "Open a real patch",
-            "description": "Right-click a .patch or .diff file, drag it onto Patch Reviews, or paste patch text.\n[Open Patch from Clipboard](command:viewPatch.openFromClipboard)",
+            "description": "Open a patch where its repository lives: locally or in a remote window. The browser shows hunks only because it cannot run Git.\n[Open Patch from Clipboard](command:viewPatch.openFromClipboard)",
             "media": { "markdown": "media/walkthrough/open.md" },
             "completionEvents": ["onCommand:viewPatch.open", "onCommand:viewPatch.openFromClipboard"]
           },
           {
             "id": "viewPatch.step.hunks",
             "title": "No repository? View hunks only",
-            "description": "An explicitly partial view that never invents missing lines.\n[View Patch Hunks Only](command:viewPatch.openHunks)",
+            "description": "Hunks show only the patch's lines, not complete files. Right-click an open review to switch modes without selecting its source again.\n[View Patch Hunks Only](command:viewPatch.openHunks)",
             "media": { "markdown": "media/walkthrough/hunks.md" },
             "completionEvents": ["onCommand:viewPatch.openHunks"]
           },
           {
             "id": "viewPatch.step.checklist",
             "title": "Track your review",
-            "description": "The Patch Reviews panel keeps the repository, base, file list, and reviewed checkmarks - and they survive reloads.\n[Show Patch Reviews](command:viewPatch.showSummary)",
+            "description": "Mark files reviewed, then refresh. Reopen saved patch files after a reload; unsaved clipboard and sample patches are not saved in recent history.\n[Show Patch Reviews](command:viewPatch.showSummary)\n[Reopen Recent Patch...](command:viewPatch.openRecent)",
             "media": { "markdown": "media/walkthrough/checklist.md" },
             "completionEvents": ["onCommand:viewPatch.showSummary", "onCommand:viewPatch.toggleReviewed"]
           },
@@ -343,6 +366,16 @@
           "command": "viewPatch.reportProblem",
           "when": "view == viewPatch.reviews",
           "group": "2_help@1"
+        },
+        {
+          "command": "viewPatch.showOutput",
+          "when": "view == viewPatch.reviews",
+          "group": "2_help@2"
+        },
+        {
+          "command": "viewPatch.showEnvironment",
+          "when": "view == viewPatch.reviews",
+          "group": "2_help@3"
         }
       ],
       "view/item/context": [
@@ -365,6 +398,16 @@
           "command": "viewPatch.changeBase",
           "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
           "group": "review@1"
+        },
+        {
+          "command": "viewPatch.showHunks",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "mode@1"
+        },
+        {
+          "command": "viewPatch.showCompleteFiles",
+          "when": "view == viewPatch.reviews && viewItem == viewPatch.review",
+          "group": "mode@2"
         },
         {
           "command": "viewPatch.compareWith",

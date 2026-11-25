@@ -66,6 +66,67 @@ suite('Review workflow commands', () => {
         assert.match(text, /Open reviews: \d+/);
     });
 
+    test('shows the running environment without copying diagnostics or opening a review', async () => {
+        await vscode.env.clipboard.writeText('clipboard before showing the environment');
+        const text = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
+        assert.match(text, /^View Patch \d+\.\d+\.\d+\nRunning on: local (Windows|macOS|Linux)/);
+        assert.strictEqual(await vscode.env.clipboard.readText(), 'clipboard before showing the environment');
+        assert.strictEqual(api.reviews.list().length, 0);
+    });
+
+    test('switches the selected review between modes without choosing the active patch or losing its target', async () => {
+        const uri = patchFile();
+        const first = await open(uri);
+        await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: first.id });
+        const decoy = await open(patchFile());
+        await settings().update('repositories', [], vscode.ConfigurationTarget.Global);
+        try {
+            const partial = await vscode.commands.executeCommand<ShownPatch>(
+                'viewPatch.showHunks', { reviewId: first.id });
+            assert.strictEqual(partial.id, first.id);
+            assert.strictEqual(partial.mode, 'partial');
+            assert.strictEqual(partial.repo, undefined, 'a hunk-only review must not claim complete files');
+            assert.match(partial.title, /partial context/);
+            assert.strictEqual(partial.sections[0].reviewed, 0,
+                'reviewing complete files must not mark their partial representation reviewed');
+            assert.strictEqual(api.reviews.list().find(review => review.id === decoy.id)?.mode, 'complete');
+            await vscode.commands.executeCommand('viewPatch.markAllReviewed', { reviewId: first.id });
+            const complete = await vscode.commands.executeCommand<ShownPatch>(
+                'viewPatch.showCompleteFiles', { reviewId: first.id });
+            assert.strictEqual(complete.id, first.id);
+            assert.strictEqual(complete.mode, 'complete');
+            assert.strictEqual(complete.repo, first.repo,
+                'the chosen repository must survive even without repository candidates');
+            assert.strictEqual(complete.base, first.base);
+            assert.strictEqual(complete.sections[0].reviewed, 0);
+            assert.doesNotMatch(complete.title, /partial context/);
+            const again = await vscode.commands.executeCommand<ShownPatch>(
+                'viewPatch.showCompleteFiles', { reviewId: first.id });
+            assert.strictEqual(again.id, first.id);
+            assert.strictEqual(api.reviews.list().length, 2, 'switching created another review');
+            assert.strictEqual(vscode.window.tabGroups.all.flatMap(group => group.tabs)
+                .filter(tab => tab.label.startsWith(first.title)).length, 1, 'switching left duplicate review tabs');
+        } finally {
+            await settings().update('repositories', [repo], vscode.ConfigurationTarget.Global);
+        }
+    });
+
+    test('a failed complete-file switch keeps the partial review available', async () => {
+        const uri = patchFile(formatPatch(repo, commit).replace('+two', '+three'));
+        const [partial] = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openHunks', uri);
+        await settings().update('repositories', [], vscode.ConfigurationTarget.Global);
+        try {
+            const complete = await vscode.commands.executeCommand<ShownPatch | undefined>(
+                'viewPatch.showCompleteFiles', { reviewId: partial.id });
+            assert.strictEqual(complete, undefined);
+            assert.strictEqual(api.reviews.list()[0].id, partial.id);
+            assert.strictEqual(api.reviews.list()[0].mode, 'partial');
+            assert.match((await readSide(partial, '/src/value.txt')).after ?? '', /three/);
+        } finally {
+            await settings().update('repositories', [repo], vscode.ConfigurationTarget.Global);
+        }
+    });
+
     test('previews a redacted problem report and, when cancelled, copies and opens nothing', async () => {
         const gitExtension = vscode.extensions.getExtension<{ getAPI(version: 1): unknown }>('vscode.git');
         assert.ok(gitExtension);
@@ -205,6 +266,9 @@ suite('Review workflow commands', () => {
         const sides = await readSide(shown, '/src/value.txt');
         assert.strictEqual(sides.before, 'two\n');
         assert.strictEqual(sides.after, 'three\n');
+        await assert.rejects(api.reviews.switchMode({ reviewId: shown.id }, 'partial'),
+            /Commit and version-comparison reviews are already complete-file snapshots/);
+        assert.strictEqual(api.reviews.list().find(review => review.id === shown.id)?.mode, 'complete');
     });
 
     test('reports identical patch versions instead of opening an empty comparison', async () => {

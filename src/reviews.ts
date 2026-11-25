@@ -30,6 +30,7 @@ export interface Review extends ReviewData {
     readonly id: string;
     readonly title: string;
     readonly reviewed: Set<string>;
+    readonly completeTarget?: { readonly repo: string; readonly base: string };
     section: string;
     opening: boolean;
     seen: boolean;
@@ -114,6 +115,10 @@ export class ReviewTree implements vscode.TreeDataProvider<ReviewNode>, vscode.D
         root.description = `${prefix}${files.length} changes, ${checked} reviewed`
             + `${review.sourceChanged ? '; source changed' : ''}`;
         root.tooltip = `${review.title}\n${review.mode === 'partial' ? 'Partial context only' : review.repo ?? ''}`;
+        root.accessibilityInformation = {
+            label: `${review.source.name}, ${root.description}, `
+                + (review.mode === 'partial' ? 'hunks only, partial context' : 'complete files'),
+        };
         root.command = { command: 'viewPatch.showReview', title: 'Show Review', arguments: [{ reviewId: review.id }] };
         return root;
     }
@@ -197,8 +202,14 @@ export class ReviewTree implements vscode.TreeDataProvider<ReviewNode>, vscode.D
             item.description = `${file.status}${reviewed ? ' | reviewed' : ''}${fileDetail(file)}`;
             item.contextValue = reviewed ? 'viewPatch.file.reviewed' : 'viewPatch.file.unreviewed';
             item.iconPath = new vscode.ThemeIcon(reviewed ? 'pass' : 'circle-outline');
-            item.tooltip = `${file.oldPath === file.newPath ? file.newPath : `${file.oldPath} -> ${file.newPath}`}`
-                + `\n${file.note ?? fileDetail(file).replace(/^ \| /, '')}`;
+            const name = file.oldPath === file.newPath ? file.newPath : `${file.oldPath} -> ${file.newPath}`;
+            const detail = file.note ?? fileDetail(file).replace(/^ \| /, '');
+            item.tooltip = `${name}\n${detail}`;
+            item.accessibilityInformation = {
+                label: `${name}, ${file.status}, ${reviewed ? 'reviewed' : 'unreviewed'}`
+                    + (detail ? `, ${detail}` : '')
+                    + (review.mode === 'partial' && !detail.includes('partial context') ? ', partial context' : ''),
+            };
             item.command = {
                 command: 'viewPatch.openFile',
                 title: 'Open File Difference',

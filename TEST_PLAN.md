@@ -28,6 +28,7 @@ diff editor rendering, and the registries' own behavior.
 | R12 | Oldest supported editor: the extension relies on behavior newer than `engines.vscode` (`^1.90.0`) allows. |
 | R13 | Release integrity: the published package differs from the one that passed the tests, ships on the wrong channel, omits files it needs when installed, or carries a known-vulnerable dependency. |
 | R14 | Problem-report privacy: a report or diagnostics reveal the home folder or workspace paths, or anything is copied or opened before the user confirms. |
+| R15 | Review usability and accessibility: the execution host, review mode, or checklist state is unclear, or a mode switch targets an unrelated patch. |
 
 ## Test layers and environments
 
@@ -98,6 +99,8 @@ Each row names the files that guard a risk and representative tests from them, q
 | R13 | unit | [`src/test/unit/qualityDashboard.test.ts`](src/test/unit/qualityDashboard.test.ts) | "matches digests from every job and the Marketplace download of the published version"; "reports a mismatch for a differing digest or channel"; "reports not recorded or unavailable instead of claiming a match"; "reads no log for a publishing job that the run skipped and compares the other digests"; "leaves digests unavailable when the package or Marketplace publish job has no readable digest"; "keeps an Open VSX job that ran without a matching digest visible as failed or unverified"; "reads digests only from the package, publish, and Open VSX jobs, not other jobs named like them" |
 | R14 | unit | [`src/test/unit/problemReport.test.ts`](src/test/unit/problemReport.test.ts) | "shows a POSIX home folder as ~ wherever a path starts with it"; "matches a Windows home case-insensitively with either slash"; "shows a workspace folder as <workspace>, even inside the home folder"; "does not redact a folder that only prefixes another folder name" |
 | R14 | editor | [`src/test/integration/features.test.ts`](src/test/integration/features.test.ts) | "previews a redacted problem report and, when cancelled, copies and opens nothing"; "copies the previewed report and opens the issue form with no report content in its address" |
+| R15 | editor | [`src/test/integration/documents.test.ts`](src/test/integration/documents.test.ts), [`src/test/integration/features.test.ts`](src/test/integration/features.test.ts) | "announces reviewed state, renamed paths, and partial context in the checklist"; "shows the running environment without copying diagnostics or opening a review"; "switches the selected review between modes without choosing the active patch or losing its target"; "a failed complete-file switch keeps the partial review available" |
+| R15 | web | [`src/test/web/suite.test.ts`](src/test/web/suite.test.ts) | "shows the browser environment and declines complete-file switching without losing the review" |
 
 <!-- traceability:end -->
 
@@ -118,9 +121,9 @@ disagree with the sources; update this plan in the same change as the tests.
 | Layer      | Runner                                                            | Test sources                        | Count |
 | ---------- | ----------------------------------------------------------------- | ----------------------------------- | ----: |
 | unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   383 |
-| editor     | Mocha in VS Code, `npm run test:editor`                           | `src/test/integration/**/*.test.ts` |    59 |
+| editor     | Mocha in VS Code, `npm run test:editor`                           | `src/test/integration/**/*.test.ts` |    63 |
 | restricted | Isolated VS Code, `npm run test:restricted`                       | `src/test/restricted/run.ts`        |     1 |
-| web        | Mocha in headless Chromium, `npm run test:web`                    | `src/test/web/suite.test.ts`        |     6 |
+| web        | Mocha in headless Chromium, `npm run test:web`                    | `src/test/web/suite.test.ts`        |     7 |
 | package    | Mocha in VS Code on the installed `.vsix`, `npm run test:package` | `src/test/package/**/*.test.ts`     |     4 |
 
 <!-- test-inventory:end -->
@@ -158,6 +161,12 @@ Not automated:
 - The Open VSX listing after an Open VSX publish. The quality dashboard reports the listed version, channel, and
   whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
+- Actual screen-reader speech and discoverability of the version/environment message and log menu in local,
+  remote, and browser windows.
+  The editor and web tests check accessibility labels, but not a screen reader's rendering of them.
+  Before a regular release, verify a reviewed mark is announced after toggling and that partial context is spoken.
+  The installed-package suite also switches a selected review to hunks and back with another review open, opens
+  the output channel, and reads the environment; its host remains local, not a real remote connection.
 
 [RELEASING.md](RELEASING.md#checking-a-package-locally) asks for the first two before each regular release; the
 [regular release runbook](RELEASE_RUNBOOK.md) gives their steps, decision rules, and results.

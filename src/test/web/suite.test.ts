@@ -113,4 +113,33 @@ suite('View Patch in the web extension host', () => {
         check(/^Git version: unavailable: VS Code for the Web cannot run Git\.$/m.test(text),
             `the Git line must give the real reason:\n${text}`);
     });
+
+    test('shows the browser environment and declines complete-file switching without losing the review', async () => {
+        const text = await vscode.commands.executeCommand<string>('viewPatch.showEnvironment');
+        check(text.includes('Running on: browser (no Node.js; Git unavailable)'),
+            `the environment must explain browser capabilities: ${text}`);
+        const [partial] = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openSample');
+        const shown = await vscode.commands.executeCommand<ShownPatch>(
+            'viewPatch.showHunks', { reviewId: partial.id });
+        check(shown.id === partial.id && shown.mode === 'partial', 'same-mode switching must reuse the review');
+        let message = '';
+        try {
+            await api.reviews.switchMode({ reviewId: partial.id }, 'complete');
+        } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+        }
+        check(message.includes('VS Code for the Web cannot run Git.'), `the refusal must explain why: ${message}`);
+        check(api.reviews.list().length === 1 && api.reviews.list()[0].id === partial.id,
+            'the original partial review must remain open');
+        const root = api.reviews.tree.getChildren()[0];
+        const file = api.reviews.tree.getChildren(root).find(node => node.kind === 'file');
+        check(file, 'the review must have a file row');
+        const label = file.accessibilityInformation?.label;
+        check(typeof label === 'string', 'the file must have a spoken label');
+        check(label.includes('unreviewed'), 'the spoken label must include state');
+        check(label.includes('partial context'), 'the spoken label must include mode');
+        await vscode.commands.executeCommand('viewPatch.toggleReviewed', file);
+        const marked = api.reviews.tree.getChildren(root).find(node => node.kind === 'file');
+        check(marked?.accessibilityInformation?.label.includes(', reviewed'), 'the spoken state must update');
+    });
 });

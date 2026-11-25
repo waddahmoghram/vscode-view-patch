@@ -169,4 +169,31 @@ suite('Review snapshots', () => {
             tree.dispose();
         }
     });
+
+    test('announces reviewed state, renamed paths, and partial context in the checklist', () => {
+        const renamed: SnapshotFile = {
+            ...file(), status: 'R', oldPath: 'old.txt', newPath: 'new.txt', note: 'rename without edits',
+        };
+        const review: Review = {
+            source: { uri: vscode.Uri.parse('untitled:example.patch'), name: 'example.patch' },
+            mode: 'partial', digest: 'first', sections: [{ key: 'combined', label: 'Changes', files: [renamed] }],
+            id: 'r1', title: 'Review', section: 'combined', opening: false, seen: true, reviewed: new Set(),
+        };
+        const tree = new ReviewTree(new Map([[review.id, review]]));
+        try {
+            const firstRoot = tree.getChildren()[0];
+            const first = tree.getChildren(firstRoot).find(node => node.kind === 'file');
+            assert.match(first?.accessibilityInformation?.label ?? '', /old\.txt -> new\.txt.*unreviewed/);
+            assert.match(first?.accessibilityInformation?.label ?? '', /rename without edits.*partial context/);
+            assert.match(firstRoot.accessibilityInformation?.label ?? '', /0 reviewed.*partial context/);
+            review.reviewed.add(reviewFileKey('combined', renamed));
+            const markedRoot = tree.getChildren()[0];
+            const marked = tree.getChildren(markedRoot).find(node => node.kind === 'file');
+            assert.match(marked?.accessibilityInformation?.label ?? '', /old\.txt -> new\.txt, R, reviewed/);
+            assert.doesNotMatch(marked?.accessibilityInformation?.label ?? '', /unreviewed/);
+            assert.match(markedRoot.accessibilityInformation?.label ?? '', /1 reviewed/);
+        } finally {
+            tree.dispose();
+        }
+    });
 });

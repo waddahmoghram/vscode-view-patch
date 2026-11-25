@@ -34,22 +34,62 @@ that VS Code-compatible editors such as VSCodium use.
    1. Create an access token on the open-vsx.org **Access Tokens** page, then create the namespace once:
 
       ```bash
-      npx ovsx create-namespace waddahmoghram -p <token>
+      (
+        set -e
+        read -r -s -p 'Open VSX access token: ' OVSX_PAT
+        printf '\n'
+        export OVSX_PAT
+        npx --yes ovsx@1.4.0 create-namespace waddahmoghram
+      )
       ```
 
-      Creating a namespace makes you a contributor, not its owner, so Open VSX shows published versions as
-      unverified. To have them shown as verified, claim ownership by opening an issue at
-      [EclipseFdn/open-vsx.org](https://github.com/EclipseFdn/open-vsx.org/issues/new/choose).
+      Creating a namespace makes you a contributor, not its owner.
+      Since View Patch already exists on the Marketplace, Open VSX requires **owner** rights to the matching
+      `waddahmoghram` namespace before its version can become available there; contributor access is not enough.
+      Claim ownership using the namespace template at
+      [EclipseFdn/open-vsx.org](https://github.com/EclipseFdn/open-vsx.org/issues/new/choose), linking this public
+      repository and the Marketplace publisher.
+      Wait for approval before enabling the publishing job.
+      See the current [publishing](https://github.com/EclipseFdn/open-vsx.org/wiki/Publishing-Extensions) and
+      [namespace](https://github.com/EclipseFdn/open-vsx.org/wiki/Managing-Namespaces) requirements.
+      Keep access tokens out of command history; the `ovsx` tool also accepts the `OVSX_PAT` environment variable
+      instead of the `-p` argument.
    1. Publish the first Open VSX version with that token: a trusted publisher can be registered only for an
       extension that already has an active version. Save the token as the repository secret `OVSX_PAT` and set
-      the repository variable `OPEN_VSX_PUBLISHING` to `token` before a release, or publish an existing release's
-      `.vsix` by hand with `npx ovsx publish view-patch.vsix -p <token>`. Only the step that publishes to Open VSX
+      the repository variable `OPEN_VSX_PUBLISHING` to `token` before a release, or upload an existing release's
+      `.vsix` through the Open VSX site's **Publish Extension** action. Only the step that publishes to Open VSX
       receives the secret, not dependency installation or any other step. The Open VSX job is skipped while the
       variable is unset.
    1. Optional, to stop storing a token: once you own the namespace, register this repository's `publish.yml`
       workflow for the `view-patch` extension on the open-vsx.org **Trusted Publishers** settings page, set
       `OPEN_VSX_PUBLISHING` to `trusted`, and delete the `OVSX_PAT` secret and the access token. The job then
       exchanges its GitHub identity for a short-lived token that can publish only this extension.
+
+### Enable the existing Open VSX job
+
+The job is already implemented; changing its workflow condition is not necessary.
+After accepting the Publisher Agreement yourself and obtaining namespace ownership:
+
+1. Generate an Open VSX access token for this repository.
+   In GitHub **Settings** > **Secrets and variables** > **Actions** > **Secrets**, add the repository secret
+   `OVSX_PAT` with that token.
+   Do not put the token in a repository variable, a file, an issue, or a chat message.
+1. In the **Variables** tab on the same settings page, add the repository variable `OPEN_VSX_PUBLISHING` with
+   the exact value `token`.
+   The next intentional Publish run will publish its verified package to both registries.
+   Adding the variable does not itself run publishing, and leaving it unset keeps the optional job skipped.
+1. Check that the Open VSX job succeeds and its package digest matches the Marketplace publishing job.
+   Registry scanning can delay availability; check the listing after processing.
+   If only Open VSX fails, rerun only that failed job, not the whole Publish workflow.
+
+To add the existing regular 0.3.7 without republishing it to the Marketplace, download `view-patch.vsix` from
+[its GitHub release](https://github.com/waddahmoghram/vscode-view-patch/releases/tag/v0.3.7).
+Verify its Secure Hash Algorithm, 256-bit (SHA-256) checksum is
+`185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`, then
+upload that unchanged package with the Open VSX site's **Publish Extension** action.
+Do not rerun this repository's Publish workflow for 0.3.7: the Marketplace version is already published.
+Before advertising support for another editor, smoke-test the package in that editor; a registry listing alone
+does not prove compatibility.
 
 ## Release channels
 
@@ -96,7 +136,7 @@ give a regular release a version higher than the latest pre-release for pre-rele
 1. When Open VSX publishing is enabled, a separate job checks for the same `CHANGELOG.md` section, then publishes the
    same file there and records its digest. If only that job fails, re-run it alone; re-running the whole workflow
    would try to publish the Marketplace version again, which the Marketplace refuses. To add a version that is
-   already on the Marketplace, publish its `.vsix` by hand with `npx ovsx publish view-patch.vsix -p <token>`.
+   already on the Marketplace, upload its unchanged `.vsix` through the Open VSX site's **Publish Extension** action.
 
 ## Pre-releases
 
@@ -105,15 +145,15 @@ A pre-release needs a version number of its own.
 Preview status is a flag recorded in the package when the verification workflow builds it, not a `-beta` suffix on the version.
 VS Code moves users to the highest available version, so plan preview and regular versions together.
 
-For the prepared `0.3.6` candidate, the version and lockfile are already updated and the former `Unreleased` notes are under `## 0.3.6`.
+For the prepared `0.3.8` candidate, the version and lockfile are already updated and the notes are under `## 0.3.8`.
 Do not bump them again unless that version has since been published.
 Use this sequence to finish the release:
 
-1. Review the changes from `main` to `vp/improvements`.
-   In a clean checkout on `main`, run `git merge --ff-only vp/improvements`.
+1. Review the changes from `main` to `vp/usability-0.3.8`.
+   In a clean checkout on `main`, run `git merge --ff-only vp/usability-0.3.8`.
    If it cannot fast-forward, stop and reconcile the changes before publishing.
 1. From an authenticated terminal, push only `main` to `https://github.com/waddahmoghram/vscode-view-patch.git`.
-   Do not create or push `v0.3.6`: version tags trigger a regular release in this repository.
+   Do not create or push `v0.3.8`: version tags trigger a regular release in this repository.
 1. On [Actions](https://github.com/waddahmoghram/vscode-view-patch/actions), wait for continuous integration (CI) and CodeQL to pass on the pushed commit.
    Check that the Windows unit tests skip only the one filename test documented in [the test plan](TEST_PLAN.md#test-inventory).
 1. Open [Publish](https://github.com/waddahmoghram/vscode-view-patch/actions/workflows/publish.yml), choose **Run workflow**, select `main`, leave **Publish as a pre-release** checked, and run it once.
@@ -122,16 +162,22 @@ Use this sequence to finish the release:
 1. Wait for every verification job and the Marketplace publish job to pass.
    The optional Open VSX job may be skipped.
    The package and publishing summaries must show `pre-release` and the same SHA-256 checksum.
-1. After Marketplace processing, check [View Patch](https://marketplace.visualstudio.com/items?itemName=waddahmoghram.view-patch) offers `0.3.6` as a pre-release while `0.3.5` remains the regular version.
-   Choose **Switch to Pre-Release Version** in VS Code, reload, and run **View Patch: Copy Diagnostics** to confirm `0.3.6` is actually loaded.
+1. After Marketplace processing, check [View Patch](https://marketplace.visualstudio.com/items?itemName=waddahmoghram.view-patch) offers `0.3.8` as a pre-release while `0.3.7` remains the regular version.
+   Choose **Switch to Pre-Release Version** in VS Code, reload, and run **View Patch: Show Environment** or
+   **View Patch: Copy Diagnostics** to confirm `0.3.8` is actually loaded.
 
 This manual workflow does not create a GitHub release.
 If a run fails after publishing has started, inspect its publishing step and the Marketplace before retrying; never blindly rerun an already-published version.
 If source changes are needed after publication, use a new version.
 
-Before promoting this candidate to a regular release, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.6` for the runtime identity gate rather than the old campaign's version.
-Also try dropping one patch while another file is active, and **Report a Problem...**: cancellation must leave the clipboard untouched and open no browser; confirmation must copy only the previewed report and open the issue form without submitting it.
-Review the preview for remaining private information before confirming.
+Before promoting this candidate to a regular release, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.8` for the runtime identity gate rather than the old campaign's version.
+Also check the environment/version shown above Patch Reviews in local, remote, and browser windows, and open the
+log with **Show View Patch Output**.
+With a different patch active, right-click the intended review and switch it to hunks only and back to complete
+files; it should reuse that review, keep its target, and leave the other review untouched.
+In the browser, the complete-file action must explain that Git is unavailable and keep the partial review open.
+Use a screen reader to confirm that file labels announce reviewed/unreviewed state as it changes, and partial
+context; automated label checks do not prove actual speech output.
 Automated tests do not replace these manual checks.
 
 ## Checking a package locally

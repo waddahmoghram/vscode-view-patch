@@ -106,6 +106,21 @@ function hostRunsGit(): boolean {
     return typeof process !== 'undefined' && typeof process.versions?.node === 'string';
 }
 
+function extensionVersion(): string {
+    const version: unknown = vscode.extensions.getExtension('waddahmoghram.view-patch')?.packageJSON.version;
+    return typeof version === 'string' ? version : '(unknown version)';
+}
+
+function environmentLabel(): string {
+    if (!hostRunsGit()) {
+        return 'Running on: browser (no Node.js; Git unavailable)';
+    }
+    const platform = process.platform === 'win32' ? 'Windows'
+        : process.platform === 'darwin' ? 'macOS' : process.platform === 'linux' ? 'Linux' : process.platform;
+    return `Running on: ${vscode.env.remoteName ? 'remote' : 'local'} ${platform}`
+        + (vscode.env.remoteName ? ` (${vscode.env.remoteName})` : '');
+}
+
 export class ReviewController implements vscode.Disposable {
     readonly documents = new PatchDocuments();
     private readonly reviews = new Map<string, Review>();
@@ -136,6 +151,8 @@ export class ReviewController implements vscode.Disposable {
                 },
             },
         });
+        this.view.description = `v${extensionVersion()}`;
+        this.view.message = environmentLabel();
         this.subscriptions.push(
             this.view,
             this.tree,
@@ -240,6 +257,26 @@ export class ReviewController implements vscode.Disposable {
             throw new Error('A commit review is pinned to its commit. Run Review a Commit for another revision.');
         }
         return this.run(review.source.uri, 'choose', true);
+    }
+
+    async switchMode(reference: unknown, mode: ReviewData['mode']): Promise<ShownPatch | undefined> {
+        const review = this.find(reference);
+        if (review.source.uri.scheme === COMPARE_SCHEME || review.source.uri.scheme === COMMIT_SCHEME) {
+            throw new Error('Commit and version-comparison reviews are already complete-file snapshots.'
+                + ' Open a patch file to switch between complete files and hunks only.');
+        }
+        if (mode === 'complete' && !hostRunsGit()) {
+            throw new Error(`Complete-file reviews need Git. ${WEB_NO_GIT}`
+                + ' Open the patch in desktop Visual Studio Code with its repository.');
+        }
+        if (this.pending.has(review.source.uri.toString())) {
+            throw new Error('This review is still loading. Wait for it to finish before switching modes.');
+        }
+        if (review.mode === mode && !review.sourceChanged) {
+            await this.display(review, review.section);
+            return this.describe(review);
+        }
+        return this.run(review.source.uri, mode === 'partial' ? 'partial' : 'auto', true);
     }
 
     async showReview(reference?: unknown): Promise<ShownPatch> {
@@ -607,6 +644,16 @@ export class ReviewController implements vscode.Disposable {
         return text;
     }
 
+    showEnvironment(): string {
+        const text = `View Patch ${extensionVersion()}\n${environmentLabel()}`;
+        void vscode.window.showInformationMessage(text);
+        return text;
+    }
+
+    showOutput(): void {
+        this.log.show(true);
+    }
+
     /** Previews a redacted report; only if the user confirms is it copied and the issue form opened. */
     async reportProblem(): Promise<boolean> {
         const text = problemReport(await this.diagnostics());
@@ -652,14 +699,12 @@ export class ReviewController implements vscode.Disposable {
                 gitVersion = `unavailable: ${firstLines(errorMessage(error))}`;
             }
         }
-        const manifest = vscode.extensions.getExtension('waddahmoghram.view-patch')?.packageJSON as
-            { version?: string } | undefined;
         const configured = vscode.workspace.getConfiguration('viewPatch').get<unknown[]>('repositories', []);
         const platform = runsGit
             ? `${process.platform} ${process.arch}; Node ${process.versions.node}`
             : 'browser (no Node.js)';
         const text = [
-            `View Patch ${manifest?.version ?? '(unknown version)'}`,
+            `View Patch ${extensionVersion()}`,
             `Editor: ${vscode.env.appName} ${vscode.version} (${vscode.env.appHost})`,
             `Remote: ${vscode.env.remoteName ?? '(none)'}`,
             `Platform: ${platform}`,
@@ -900,9 +945,10 @@ export class ReviewController implements vscode.Disposable {
         }
         const api = await this.gitApi();
         const git = new Git(gitExecutable(api));
-        if (previous?.repo && previous.base && mode !== 'choose') {
-            const applied = await applyPatch(git, previous.repo, previous.base, source.bytes, options);
-            return completeReview(source, digest, { repo: previous.repo, base: previous.base, applied });
+        const previousTarget = previous?.completeTarget;
+        if (previousTarget && mode !== 'choose') {
+            const applied = await applyPatch(git, previousTarget.repo, previousTarget.base, source.bytes, options);
+            return completeReview(source, digest, { ...previousTarget, applied });
         }
         const candidates = await findRepositories(git, candidateFolders(source, api), options);
         const commit = patchCommit(Buffer.from(source.bytes).toString('utf8'));
@@ -1029,6 +1075,8 @@ export class ReviewController implements vscode.Disposable {
             id,
             title: reviewTitle(data.source.name, Number(id.slice(1)), data.mode),
             reviewed: previous ? preserveReviewed(previous, data) : this.storedReviewed(data),
+            completeTarget: data.mode === 'complete' && data.repo && data.base
+                ? { repo: data.repo, base: data.base } : previous?.completeTarget,
             section: section.key,
             opening: true,
             seen: previous?.seen ?? false,

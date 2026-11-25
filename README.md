@@ -51,6 +51,14 @@ choose a repository and revision yourself.
 Run **View Patch: View Patch Hunks Only**, or choose **View Hunks Only** when a complete-file review cannot apply.
 This mode needs neither Git nor workspace trust.
 
+For an open patch review, right-click its name in **Patch Reviews** and choose **Show Hunks Only for Review** or
+**Show Complete Files for Review**.
+These actions reuse that review's original source, not a different patch in the active editor.
+They retain its repository and base choice while it stays open, and keep reviewed marks only for representations
+whose contents and metadata are unchanged.
+Commit and version-comparison reviews cannot switch modes.
+Complete files still need Git, a matching repository, and workspace trust; a failed switch keeps the existing view.
+
 The title, summary, and document headers explicitly say **partial context**. Only lines actually present in the
 patch are shown, with original line ranges and omitted-context separators. Missing file contents are never invented.
 Binary payloads are not reconstructed; only their supplied metadata is shown.
@@ -94,11 +102,14 @@ encoded diffs review normally. Unsupported encodings and multipart mail are reje
 Expand **Patch Reviews** in the Explorer, or run **View Patch: Show Patch Reviews**.
 Expand **Review Details** for the selected patch's subject, author, date, snapshot identifier, and detailed counts.
 The panel divider can be dragged upward to give a large checklist more room.
+The view shows the loaded extension version and **Running on: local**, **remote**, or **browser**.
+**Show Environment** in its **...** menu displays the same information without copying diagnostics.
 
 - See the repository, base, subject, author, date, and added/modified/deleted/renamed file counts.
 - Filter old and new paths with the filter button.
 - Toggle each file's **reviewed** checkmark. Selecting a file opens its individual diff. **Mark All Reviewed**
   and **Clear Reviewed Checkmarks** work on the whole review, and the view's badge counts unreviewed files.
+  Screen-reader labels include reviewed/unreviewed state and identify partial context.
 - **Next/Previous Unreviewed File** walk what is left; the `viewPatch.markReviewedOnOpen` setting checks files
   off as you open them.
 - **Copy Review Summary as Markdown** copies the repository, base, file list, per-file line counts, and
@@ -118,6 +129,7 @@ the open snapshot is never silently replaced.
 Reviews are also remembered across reloads: reopening an unchanged patch restores its reviewed checkmarks and
 retries the previously chosen repository and base first, and **Reopen Recent Patch...** lists recent reviews,
 including series. The remembered list stays on this machine.
+Unsaved clipboard, pasted, and sample patches are not added to recent history; save the patch first to reopen it later.
 
 ## Read-only, bounded operation
 
@@ -163,8 +175,10 @@ a leading `~` in an extra repository path means your home folder.
 
 ## Privacy and troubleshooting
 
-View Patch does not collect telemetry, contact a hosting service, or fetch missing objects. The **View Patch** output
-channel (**View** > **Output**) explains repository selection, cancellation, limits, and Git failures.
+View Patch does not collect telemetry, contact a hosting service, or fetch missing objects.
+**View Patch: Show View Patch Output**, also in the Patch Reviews view's **...** menu, opens the **View Patch** output
+channel directly, rather than the editor's unrelated **Window** log.
+It explains repository selection, cancellation, limits, and Git failures.
 For a bug report, **View Patch: Report a Problem...** (also in the Patch Reviews view's **...** menu and on View
 Patch error messages) opens a preview of the version, editor, platform, and Git details. Only if you confirm does it
 copy that text and open the GitHub issue form in your browser; nothing is sent for you. The report leaves out patch

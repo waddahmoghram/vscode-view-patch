@@ -254,6 +254,20 @@ suite('View Patch commands', () => {
             const [reopened] = await vscode.commands.executeCommand<ShownPatch[]>('viewPatch.openSeries',
                 first, [first, second]);
             assert.strictEqual(reopened.id, shown.id);
+            const partial = await vscode.commands.executeCommand<ShownPatch>(
+                'viewPatch.showHunks', { reviewId: shown.id });
+            assert.strictEqual(partial.id, shown.id);
+            assert.strictEqual(partial.mode, 'partial');
+            assert.deepStrictEqual(partial.sections.map(section => section.key), ['part1', 'part2']);
+            const complete = await vscode.commands.executeCommand<ShownPatch>(
+                'viewPatch.showCompleteFiles', { reviewId: shown.id });
+            assert.strictEqual(complete.id, shown.id);
+            assert.strictEqual(complete.mode, 'complete');
+            assert.strictEqual((await readSides(complete))[0].after, 'one\n');
+            const combined = await vscode.commands.executeCommand<ShownPatch>('viewPatch.showReview', {
+                reviewId: shown.id, sectionKey: 'combined',
+            });
+            assert.strictEqual((await readSides(combined))[0].after, 'two\n');
             assert.strictEqual(reviewTabs(shown).length, 1);
         } finally {
             await settings().update('repositories', [repo], vscode.ConfigurationTarget.Global);
