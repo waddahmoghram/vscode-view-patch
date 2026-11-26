@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.9
+
+- The regular release of pre-release [0.3.8](CHANGELOG.md#038), with the same code. New on the regular channel: the
+  Patch Reviews title shows the loaded version and where View Patch runs; **Show View Patch Output**;
+  **Show Hunks Only for Review** and **Show Complete Files for Review**, which keep reviewed marks while the patch
+  is unchanged; screen-reader labels in words; and walkthrough notes on local and remote windows and review modes.
+
 ## 0.3.8
 
 Pre-release.

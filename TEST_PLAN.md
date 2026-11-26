@@ -185,7 +185,7 @@ Known defects:
   browser can never run Git, and **Copy Diagnostics** gave a misleading home-folder reason for the missing Git
   version. Web reviews now open hunk-only with a one-time explanation, **Review a Commit** declines with the reason,
   and the diagnostics name it. The three R5 web tests that cover this failed against 0.3.3.
-- Fixed in f60d720: **Copy Diagnostics** failed in VS Code for the Web because it read Node.js process details.
+- Fixed in 0b1c149: **Copy Diagnostics** failed in VS Code for the Web because it read Node.js process details.
   The web test "diagnostics are produced without Node globals, for bug reports from the web" now covers it,
   alongside the desktop editor test "copies diagnostics that identify the install without running a review".
 

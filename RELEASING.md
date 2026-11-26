@@ -145,9 +145,10 @@ A pre-release needs a version number of its own.
 Preview status is a flag recorded in the package when the verification workflow builds it, not a `-beta` suffix on the version.
 VS Code moves users to the highest available version, so plan preview and regular versions together.
 
-For the prepared `0.3.8` candidate, the version and lockfile are already updated and the notes are under `## 0.3.8`.
-Do not bump them again unless that version has since been published.
-Use this sequence to finish the release:
+Pre-release `0.3.8` was published with this sequence on 2026-11-25, by Publish run `45571963415` from `67233b9`.
+The history rewrite of 2026-11-26 renamed that commit `429fb68`; the [release runbook](RELEASE_RUNBOOK.md#2026-11-26---history-rewritten) maps both.
+That version cannot be published again; a later pre-release needs its own version and `CHANGELOG.md` section.
+The sequence used:
 
 1. Review the changes from `main` to `vp/usability-0.3.8`.
    In a clean checkout on `main`, run `git merge --ff-only vp/usability-0.3.8`.
@@ -170,7 +171,7 @@ This manual workflow does not create a GitHub release.
 If a run fails after publishing has started, inspect its publishing step and the Marketplace before retrying; never blindly rerun an already-published version.
 If source changes are needed after publication, use a new version.
 
-Before promoting this candidate to a regular release, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.8` for the runtime identity gate rather than the old campaign's version.
+Before promoting `0.3.8` to regular `0.3.9`, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.8` for the runtime identity gate rather than the old campaign's version.
 Also check the version and host in the Patch Reviews title in local, remote, and browser windows, that the empty
 view still shows its welcome buttons, and open the log with **Show View Patch Output**.
 With a different patch active, right-click the intended review and switch it to hunks only and back to complete
@@ -179,6 +180,7 @@ In the browser, the review menu must not offer complete files.
 Use a screen reader to confirm that file labels say "reviewed" or "not reviewed" as the mark changes, and
 "partial context"; automated label checks do not prove actual speech output.
 Automated tests do not replace these manual checks.
+The [release runbook](RELEASE_RUNBOOK.md#12-commands-actually-run) records them for 0.3.9.
 
 ## Checking a package locally
 
