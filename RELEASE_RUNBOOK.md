@@ -5,13 +5,13 @@ general procedure and one-time setup; [TEST_PLAN.md](TEST_PLAN.md) names the aut
 the manual checks a regular release needs, the tag-driven publish, and the exit verification, with the decision
 rules for each step.
 
-> **Status:** IN PROGRESS for regular 0.3.9, from pre-release 0.3.8. The release commit is made, the section 8
-> diff gate passed, and on 2026-11-26 check B passed on 0.3.8, with a substitute for steps 6 and 7. Check A and
-> check B's steps 6 and 7 still have to run as written before the tag is pushed (section 12). The previous
-> campaign ended with regular 0.3.7, published 2026-11-24. The same day as check B, the history was rewritten to
-> remove co-author trailers: every commit hash changed, and no shipped file did (section 13).
+> **Status:** COMPLETE for regular 0.3.9, published 2026-11-26 by pushing tag `v0.3.9`. Both checks passed on
+> pre-release 0.3.8 that day: check B with steps 6 and 7 as written in a signed-in session, and check A in a
+> real Remote - SSH window, with its steps 3 and 4 run again in a substitute on the same host (section 12). The
+> exit verification of 0.3.9 passed. Before the release, the history was rewritten to remove co-author trailers:
+> every commit hash changed, and no shipped file did (section 13).
 >
-> **Current verdict:** pending.
+> **Current verdict:** PASS.
 >
 > **Controlling corrections:** [2026-11-26 history rewrite](#2026-11-26---history-rewritten): a rewrite that keeps
 > every shipped file keeps a campaign's identities, with section 3 naming both commits.
@@ -66,9 +66,9 @@ The question each campaign answers: is the candidate commit safe to publish on t
 | Release version | `0.3.9` | Higher than the latest pre-release, as [RELEASING.md](RELEASING.md#release-channels) requires |
 | Pre-release under test | `0.3.8` | Marketplace download, 2026-11-26 |
 | Its source commit | `67233b994e618358167afdf38038ab085de1bcbc`, rewritten as `429fb68c5be5f60a799a560ddf89c68fb7287679` | The commit Publish run `45571963415` built; CI run `45571178534` and CodeQL run `45571178621` passed on it. The rewrite changed only this runbook in that commit, and a pre-release package of the rewritten commit equals the Marketplace package in all 25 files (section 13) |
-| Its package SHA-256 | `91088dda741cc101f752a0bb3143530b002bc5ba4e4c2dbe2aeb1d8567d96688` | The Marketplace download, whose 25 files equal a package built locally from the source commit; the digests of packaging job `139062168765` and publish job `139062760108` are still to be compared (section 12) |
+| Its package SHA-256 | `91088dda741cc101f752a0bb3143530b002bc5ba4e4c2dbe2aeb1d8567d96688` | The Marketplace download, whose 25 files equal a package built locally from the source commit; the digests of packaging job `139062168765` and publish job `139062760108` were not compared (section 12) |
 | Remote-check patch | `git format-patch -1 eabcdbe`, four files, parent `d5d2748` | `git show --stat eabcdbe`; before the rewrite, `ad2e6ec` and `0aef85b` |
-| Release commit and tag | The commit that sets `0.3.9` on the rewritten source commit, tag `v0.3.9`; `main` is force-pushed to it with the rewritten history | Pending until the push (section 12) |
+| Release commit and tag | `889b167dfd1f1a18a850c8af985f4ffd89a2a18f`, tag `v0.3.9`; `main` was force-pushed to it with the rewritten history | The tag ref resolves to that commit (section 12) |
 
 ## 4. Stop rules
 
@@ -275,6 +275,7 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | 0.3.0 | regular | 2026-11-10 | `1f89c6c` | not recorded | not recorded | not comparable: rebuilt at publish |
 | 0.3.5 | regular | 2026-11-11 | `82110ca` | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | `661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`, also equal to the GitHub release asset |
 | 0.3.7 | regular | 2026-11-24 | `658e11e` | PASS on 0.3.6, 2026-11-24 | PASS on 0.3.6, 2026-11-24 | `185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`, also equal to the GitHub release asset |
+| 0.3.9 | regular | 2026-11-26 | `889b167` | PASS on 0.3.8, 2026-11-26, steps 3 and 4 in a substitute | PASS on 0.3.8, 2026-11-26 | `2f240c662445a8b5d9e5b428bf4fbdd62ebe1a62b5c89a1112f30b6f58c1e46d` from the publish job and the Marketplace, also equal to the GitHub release asset; the packaging job's log was not read |
 
 Pre-releases need no manual checks; [RELEASING.md](RELEASING.md#release-channels) lists them.
 
@@ -699,6 +700,108 @@ Still to run on 0.3.8 before the tag, each as written:
 - On Publish run `45571963415`'s **Summary** page, the `Packaged view-patch.vsix (pre-release)` and
   `Publishing view-patch.vsix (pre-release)` lines both show the section 3 digest.
 
+### Checks A and B as written: pre-release 0.3.8, 2026-11-26 (PASS, two steps in a substitute)
+
+The runs still pending above ran the same afternoon, after the rewritten history was pushed. The operator worked
+the editor; the shell steps ran on the host, where View Patch's output was also read. Times are the host's local
+time, eight hours behind Coordinated Universal Time.
+
+**Check A: PASS, with steps 3 and 4 run again in a substitute.** It ran in a new Remote - SSH window on the Linux
+host, on Visual Studio Code 1.148.0, with a fresh `~/vp-check-a` at `889b167`, trusted and used by nothing else.
+The remote install had stayed on 0.3.7 with auto update off (section 10), so 0.3.8 was installed with the host's
+VS Code Server command line, `code-server --install-extension waddahmoghram.view-patch@0.3.8`, before the window
+opened. The second patch for the mode switches was `git format-patch -1 f9ce6f0`, the rewritten "Record the 0.3.7
+release", which changes only this file.
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| Preflight | PASS | `check commit present`, no `git status` output, `count: 0`, `in-pack: 581` |
+| Title | PASS | `v0.3.8 · remote Linux`, as the operator reported |
+| 1. Identity gate | PASS | `View Patch 0.3.8`, `Remote: ssh-remote`, `Platform: linux x64; Node 24.22.1`, `Git version: git version 2.56.1`, one trusted workspace folder |
+| 2. Open Patch as Changes | PASS | The four files. Log: `remote-check.patch: complete review r1; base eabcdbec06950075f15d24526eb1b7041c7e886d^.` |
+| 3. Mark and refresh | Not shown in the window | The operator marked `src/patchText.ts`, but the log has no second `complete review r1` line, which every refresh writes, so **Refresh Review** did not run there. The substitute below ran it |
+| Mode switches with a second review open | PASS | `second-check.patch: complete review r2`. With `r2`'s tab active, **Show Hunks Only for Review** on `r1` logged `partial review r1`, and **Show Complete Files for Review** logged `complete review r1` on the same base; nothing was logged for `r2`. The operator reported the mark kept |
+| 4. View Patch Hunks Only | Not shown in the window | Both reviews had been closed and reopened as `r3` and `r4`, and `r3` was already showing hunks when the command ran: it logged `partial review r3` and opened no new review, but did not switch from complete files. The substitute below ran it |
+| 5. Close | PASS | The operator closed the review tabs; View Patch logs a review's release only at debug level |
+| Output | PASS | **Show View Patch Output** showed the log the operator copied |
+| After | PASS | No `git status` output; `count: 0`, `in-pack: 581`; refs unchanged |
+
+Under `.git`, only GitLens's `gk/config`, the commit-graph files, and `config` (`branch.main.vscode-merge-base`)
+changed, at 12:22, before View Patch's first command at 12:23:36. No object, ref, or reflog changed.
+
+The substitute ran steps 2 to 5 from 13:03 to 13:04 on the same host, with the same Git, editor version, and
+package as the window, but in a Visual Studio Code 1.148.0 test instance instead of a remote window: the
+Marketplace 0.3.8 package (`91088dda…96688`) in an empty profile, a fresh clone at `889b167`, and Workspace Trust
+disabled, so the folder counts as trusted. A test runner called the same commands:
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| 2. Open Patch as Changes | PASS | `r1`, complete files, the four files, base `eabcdbec…^` |
+| 3. Mark and refresh | PASS | After `src/patchText.ts` was marked, **Refresh Review** returned `r1` with complete files and one file reviewed |
+| 4. View Patch Hunks Only | PASS | Run with the patch file as the active editor and no argument, as from the Command Palette: the same `r1`, partial context, the four files, one reviewed, and one review listed. Its tab read `remote-check.patch [Patch 1: partial context] (4 files)` |
+| 5. Close | PASS | Closing that tab released the review; the patch file's tab stayed open |
+| After | PASS | No `git status` output; `count: 0`, `in-pack: 581`; refs unchanged; only `config` changed (`branch.main.vscode-merge-base`) |
+
+```text
+2026-11-26 13:03:51.762 [info] remote-check.patch: commit eabcdbec06950075f15d24526eb1b7041c7e886d; repositories: <scratch>/vp-check-a
+2026-11-26 13:03:52.587 [info] remote-check.patch: complete review r1; base eabcdbec06950075f15d24526eb1b7041c7e886d^.
+2026-11-26 13:03:53.568 [info] remote-check.patch: complete review r1; base eabcdbec06950075f15d24526eb1b7041c7e886d^.
+2026-11-26 13:03:54.020 [info] remote-check.patch: partial review r1; base (hunks only).
+```
+
+A remote window differs from the substitute only in that the extension host runs in the VS Code Server, the editor
+runs on another machine, and `vscode.env.remoteName` is set; the window above covered those.
+
+**Check B steps 6 and 7: PASS.** They ran in the operator's signed-in vscode.dev session, Visual Studio Code
+1.148.0. The identity gate showed `View Patch 0.3.8`, `Editor: Visual Studio Code 1.148.0 (vscode.dev)`,
+`Remote: (none)`, `Platform: browser (no Node.js)`, and `Git version: unavailable: VS Code for the Web cannot run
+Git.`
+
+| Step | Result | Observation |
+| --- | --- | --- |
+| 6. GitHub patch | PASS | **Open Patch as Changes** went straight to hunks only, with no Git warning |
+| 7. Reload and reopen | PASS | After marking `CMakeLists.txt` and reloading, **Reopen Recent Patch...** reopened the review with it still reviewed, as the operator reported |
+
+The **View Patch** output from step 6, in the browser's local time, one hour ahead of the times above:
+
+```text
+2026-11-26 14:09:52.406 [info] 0001-no-version-script-on-ohos.patch: VS Code for the Web cannot run Git. Showing the patch's hunks only.
+2026-11-26 14:09:52.657 [info] 0001-no-version-script-on-ohos.patch: partial review r1; base (hunks only).
+```
+
+Not run before the tag, by the operator's choice, from the extra checks in [RELEASING.md](RELEASING.md#pre-releases)
+and the list above:
+
+- The screen-reader check. The editor and web tests assert the labels, and check B step 5 read them back, but no
+  screen reader spoke them.
+- The **Summary** page digests of Publish run `45571963415`. Instead, the Marketplace 0.3.8 package's 25 files
+  equal packages built from both `67233b9` and `429fb68`.
+- The title in a local window. CI checks its form, `v<version> · local Windows`, in the editor tests on Windows.
+
+### Release and exit verification: 0.3.9, 2026-11-26 (PASS)
+
+Before the tag, the section 8 diff gate ran on the release commit `889b167dfd1f1a18a850c8af985f4ffd89a2a18f` with
+`tested=429fb68`: its `--stat` listed only `package.json` and `package-lock.json`, and the `package.json` diff
+changed only the `version` line.
+
+Times are Coordinated Universal Time.
+
+| Step | Result | Evidence |
+| --- | --- | --- |
+| Force push of `main` from `67233b9` to `889b167`, at about 20:15 | GitHub `main` at `889b167`, with the rewritten history; tags `v0.3.5` and `v0.3.7` at their rewritten commits `dbed665` and `5c857d3`; no Publish run started when the tags moved | The repository and its run list |
+| CI, CodeQL, and Quality dashboard on `889b167` | Passed by 20:21:07, before the tag was pushed | Runs `45889658323`, `45889658457`, and `45890367954` |
+| Tag `v0.3.9` | Points at commit `889b167dfd1f1a18a850c8af985f4ffd89a2a18f`; seen at 21:35:20 | The tag ref |
+| Publish run `45899132142`, started by the tag at 21:35:02 | Every job passed except Open VSX, which was skipped; its verify job ran CI on the tagged commit | The job listing |
+| Publish job `140182057621` | Its digest, `2f240c662445a8b5d9e5b428bf4fbdd62ebe1a62b5c89a1112f30b6f58c1e46d`, is the one the release notes name. Packaging job `140181671746`'s log was not read: it needs a GitHub sign-in | The release notes |
+| GitHub release `v0.3.9` | Regular, not a draft, published 21:40:15. Its `view-patch.vsix` is 145,681 bytes, with digest `sha256:2f240c66…c1e46d`, and its notes are the changelog section with that digest | The release |
+| Section 9 commands with `version=0.3.9`, at about 21:45 | Both downloads gave `2f240c662445a8b5d9e5b428bf4fbdd62ebe1a62b5c89a1112f30b6f58c1e46d`, the manifest reads `Version="0.3.9"`, and the pre-release property count printed `0` | Command output |
+| Listing | At 21:44:39, `0.3.9` was listed as a regular version, last updated 21:44:21.687, and was the newest version | A listing query |
+| Shipped code | The Marketplace 0.3.9 package differs from the 0.3.8 package only in `changelog.md`, the `package.json` version line, and the manifest's version and pre-release property; the 13 files under `extension/out` and `extension/dist` are identical | A file-by-file comparison of the two downloads |
+
+Verdict: PASS. The publish job's digest, the Marketplace download, and the GitHub release asset are equal, and
+the Marketplace version carries no pre-release property. The tag was on the release commit, whose only change to
+shipped files from the tested `429fb68` is its version.
+
 ## 13. Update history
 
 ### 2026-11-11 - Initial record
@@ -838,3 +941,11 @@ Still to run on 0.3.8 before the tag, each as written:
 | `658e11e` | `5c857d3` | Release 0.3.7 |
 | `745f94a` | `c2a3219` | Merge release 0.3.7 into main |
 | `67233b9` | `429fb68` | Fix 0.3.8 view title, spoken labels, and mode switching |
+
+### 2026-11-26 - 0.3.9 released
+
+- Recorded checks A and B as written on 0.3.8 in section 12, including check A's steps 3 and 4 in a substitute,
+  and the extra checks not run before the tag: the screen reader, the 0.3.8 job digests, and a local window's
+  title.
+- Recorded the release and its exit verification in section 12, filled in section 11's 0.3.9 row and section 3's
+  release row, and set the status to COMPLETE with the verdict PASS.
