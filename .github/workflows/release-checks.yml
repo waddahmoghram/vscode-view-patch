@@ -1,0 +1,229 @@
+name: Release checks
+
+# Checks a published version the way the regular release runbook does (RELEASE_RUNBOOK.md sections 6, 7, and 9),
+# after every successful Publish run and when started by hand. The exit job compares the package digests that the
+# Publish run's jobs printed, which it reads with this workflow's own token, with the GitHub release and the
+# Marketplace. The check jobs then test the version the Marketplace serves:
+#   - check B on public vscode.dev. Steps 6 and 7 run as written when the secret VSCODE_DEV_SIGN_IN_STATE holds a
+#     signed-in vscode.dev session (RELEASING.md), and through the file-backed substitute when it is not set.
+#   - check A in a local test instance on Linux and Windows, which stands in for a remote window.
+#   - check A over Remote - SSH to the runner itself, only when the repository variable VSCODE_SERVER_LICENSE is
+#     `accepted`: that run installs the Remote - SSH extension and a VS Code Server, so it accepts their licenses.
+# Each job keeps its report as an artifact and adds it to the run's summary. Nothing here publishes or writes.
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      publish_run:
+        description: Publish run id to verify; leave empty to check a version without its job digests
+        type: string
+        required: false
+      version:
+        description: Version to check; leave empty for the version that Publish run published
+        type: string
+        required: false
+      channel:
+        description: Its channel; required when no Publish run id is given
+        type: choice
+        options: [auto, regular, pre-release]
+        default: auto
+      checks:
+        description: Run checks A and B after the exit verification
+        type: choice
+        options: [all, exit-only]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: view-patch-release-checks
+  cancel-in-progress: false
+
+jobs:
+  exit:
+    name: Exit verification
+    # A Publish run from another branch only verifies; like the publish job, start from a tag push or from main.
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.head_branch == 'main')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read # the Publish run's job logs, which hold the package digests
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+      channel: ${{ steps.verify.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The verdict is kept as an output and enforced below, so the version reaches the check jobs either way.
+      - name: Verify the published package
+        id: verify
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_RUN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.publish_run }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel != 'auto' && inputs.channel || '' }}
+        run: |
+          args=(--wait-minutes 30 --out "${RUNNER_TEMP}/release-checks/exit")
+          if [ -n "${PUBLISH_RUN}" ]; then args+=(--run "${PUBLISH_RUN}"); fi
+          if [ -n "${VERSION}" ]; then args+=(--version "${VERSION}"); fi
+          if [ -n "${CHANNEL}" ]; then args+=(--channel "${CHANNEL}"); fi
+          set +e
+          node scripts/release-checks/exit.mjs "${args[@]}"
+          echo "code=$?" >> "${GITHUB_OUTPUT}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-check-exit
+          path: ${{ runner.temp }}/release-checks/exit
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Require every step to pass
+        if: steps.verify.outputs.code != '0'
+        env:
+          CODE: ${{ steps.verify.outputs.code }}
+        run: |
+          echo "::error::The exit verification did not pass (exit code ${CODE}); its report is in the summary."
+          exit 1
+
+  check-b:
+    name: Check B (vscode.dev)
+    needs: exit
+    if: >-
+      ${{ !cancelled() && needs.exit.outputs.version != '' &&
+      (github.event_name == 'workflow_run' || inputs.checks == 'all') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Only this step receives the secret. Up to four parts are joined, because one secret holds at most 48 KB.
+      - name: Restore the vscode.dev sign-in
+        id: sign-in
+        env:
+          PART_1: ${{ secrets.VSCODE_DEV_SIGN_IN_STATE }}
+          PART_2: ${{ secrets.VSCODE_DEV_SIGN_IN_STATE_2 }}
+          PART_3: ${{ secrets.VSCODE_DEV_SIGN_IN_STATE_3 }}
+          PART_4: ${{ secrets.VSCODE_DEV_SIGN_IN_STATE_4 }}
+        run: |
+          if [ -z "${PART_1}" ]; then
+            echo "No VSCODE_DEV_SIGN_IN_STATE secret, so steps 6 and 7 run through the substitute."
+            exit 0
+          fi
+          umask 077
+          printf '%s%s%s%s' "${PART_1}" "${PART_2}" "${PART_3}" "${PART_4}" > "${RUNNER_TEMP}/vscode-dev-sign-in"
+          echo "file=${RUNNER_TEMP}/vscode-dev-sign-in" >> "${GITHUB_OUTPUT}"
+      - name: Run check B
+        env:
+          VERSION: ${{ needs.exit.outputs.version }}
+          CHANNEL: ${{ needs.exit.outputs.channel }}
+          SIGN_IN_STATE: ${{ steps.sign-in.outputs.file }}
+        run: |
+          args=(--version "${VERSION}" --channel "${CHANNEL}" --out "${RUNNER_TEMP}/release-checks/check-b")
+          if [ -n "${SIGN_IN_STATE}" ]; then args+=(--sign-in-state "${SIGN_IN_STATE}"); fi
+          node scripts/release-checks/web.mjs "${args[@]}"
+      - name: Delete the sign-in state
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/vscode-dev-sign-in"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-check-b
+          path: ${{ runner.temp }}/release-checks/check-b
+          if-no-files-found: warn
+          retention-days: 30
+
+  check-a:
+    name: Check A (local test instance, ${{ matrix.os }})
+    needs: exit
+    if: >-
+      ${{ !cancelled() && needs.exit.outputs.version != '' &&
+      (github.event_name == 'workflow_run' || inputs.checks == 'all') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The Windows leg has not run yet. Until it passes once, its failure shows on the job but not the workflow.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.exit.outputs.version }}
+      CHANNEL: ${{ needs.exit.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run check A (virtual display)
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a node scripts/release-checks/remote.mjs --version "${VERSION}" --channel "${CHANNEL}"
+          --out "${RUNNER_TEMP}/release-checks/check-a"
+      - name: Run check A
+        if: runner.os != 'Linux'
+        shell: bash
+        run: >-
+          node scripts/release-checks/remote.mjs --version "${VERSION}" --channel "${CHANNEL}"
+          --out "${RUNNER_TEMP}/release-checks/check-a"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-check-a-${{ matrix.os }}
+          path: ${{ runner.temp }}/release-checks/check-a
+          if-no-files-found: warn
+          retention-days: 30
+
+  check-a-ssh:
+    name: Check A (Remote - SSH)
+    needs: exit
+    if: >-
+      ${{ !cancelled() && needs.exit.outputs.version != '' && vars.VSCODE_SERVER_LICENSE == 'accepted' &&
+      (github.event_name == 'workflow_run' || inputs.checks == 'all') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install the SSH server
+        run: |
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update
+            sudo apt-get install -y openssh-server
+          fi
+          sudo mkdir -p /run/sshd
+      # The run starts its own sshd on 127.0.0.1 with keys made for this run, and connects to it as the runner user.
+      - name: Run check A in a Remote - SSH window
+        env:
+          VERSION: ${{ needs.exit.outputs.version }}
+          CHANNEL: ${{ needs.exit.outputs.channel }}
+        run: >-
+          xvfb-run -a node scripts/release-checks/remote.mjs --version "${VERSION}" --channel "${CHANNEL}"
+          --ssh vp-check-a-localhost --local-sshd --accept-server-license
+          --out "${RUNNER_TEMP}/release-checks/check-a-ssh"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-check-a-ssh
+          path: ${{ runner.temp }}/release-checks/check-a-ssh
+          if-no-files-found: warn
+          retention-days: 30

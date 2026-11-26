@@ -4,4 +4,5 @@ dist/
 .vscode-test/
 .dashboard/
 .dashboard-history/
+.release-checks/
 *.vsix

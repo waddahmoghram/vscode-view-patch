@@ -13,7 +13,9 @@ rules for each step.
 >
 > **Current verdict:** PASS.
 >
-> **Controlling corrections:** [2026-11-26 history rewrite](#2026-11-26---history-rewritten): a rewrite that keeps
+> **Controlling corrections:** [2026-11-26 release checks automated](#2026-11-26---release-checks-automated): a
+> step that an automated run reports as PASS counts as run as written; sections 6 and 7 say which of its
+> substitutes count. [2026-11-26 history rewrite](#2026-11-26---history-rewritten): a rewrite that keeps
 > every shipped file keeps a campaign's identities, with section 3 naming both commits.
 > [2026-11-24 0.3.7 campaign](#2026-11-24---037-campaign): the release commit is made on the tested source commit
 > and tagged there, because `main` moved past that commit.
@@ -38,7 +40,9 @@ The question each campaign answers: is the candidate commit safe to publish on t
 
 ### PASS
 
-- Both manual checks in sections 6 and 7 meet every expected result, with the runtime identity gate passing.
+- Both checks in sections 6 and 7 meet every expected result, with the runtime identity gate passing. Their
+  automated runs supply this evidence step by step: a step that a run reports as PASS counts as run as written, a
+  step it reports as PASS (substitute) counts only where its section says so, and every other step is run by hand.
 - After tagging, the exit checks in section 9 pass: the Secure Hash Algorithm (SHA-256) digests from CI,
   publishing, the Marketplace, and the GitHub release are equal, and the Marketplace lists the version without the
   pre-release property.
@@ -154,6 +158,39 @@ git count-objects -v | grep -E '^(count|in-pack):'
 Expected: no `git status` output, and the same two counts as before. Any change is a FAIL: complete-file reviews
 must leave the repository unchanged.
 
+### Automated check A
+
+The Release checks workflow, [`release-checks.yml`](.github/workflows/release-checks.yml), runs check A after every
+successful Publish run, and by hand from the **Actions** tab, with
+[`scripts/release-checks/remote.mjs`](scripts/release-checks/remote.mjs). It downloads the version from the
+Marketplace, makes a fresh clone and both patches, installs the package into an empty profile, and runs this
+section's steps and the RELEASING.md extras through View Patch's commands, with the counts before and after. Its
+report numbers the extras `1a` (the title), `3a` (switching modes with a second review open), and `5a` (**Show View
+Patch Output**). Each job adds its step table to the run's summary and keeps it, with View Patch's log, as an
+artifact.
+
+- **Check A (Remote - SSH)** connects a VS Code test instance through Remote - SSH to the runner itself, through a
+  Secure Shell (SSH) server and keys made for that run, with the package installed on the remote side. Its PASS is
+  check A as written. It runs only when the repository variable `VSCODE_SERVER_LICENSE` is `accepted`, because it
+  installs the Remote - SSH extension and a VS Code Server ([RELEASING.md](RELEASING.md#release-check-sign-ins)).
+- **Check A (local test instance)** runs the same steps in a local window, on Linux and on Windows, so its report
+  marks each step in the window as PASS (substitute). Of those, steps 3, 3a, 4, and 5a count, as the substitute's
+  steps 3 and 4 did for 0.3.8 (section 12): they do not depend on where the extension host runs. The identity
+  gate, the title, and steps 2 and 5 still need a real remote window: the Remote - SSH job, or a person following
+  this section, with its preflight and after-check. On Windows, step 1a also shows a local window's title,
+  `v<version> · local Windows`. That job has not run yet, so until it passes once, its failure does not fail the
+  workflow.
+
+To run it on a workstation, from a clone with `npm ci` done (on Linux without a display, prefix `xvfb-run -a`):
+
+```bash
+npm run check:a -- --version 0.3.9 --channel regular
+```
+
+With `--ssh <host>`, it connects to that host through Remote - SSH with the workstation's own SSH configuration
+and keys, which makes it check A as written; it then also needs `--accept-server-license`, which accepts the
+licenses above for that run.
+
 ## 7. Manual check B: public vscode.dev
 
 1. Open <https://vscode.dev>, install **View Patch** from the Extensions view, then choose **Switch to
@@ -190,6 +227,30 @@ must leave the repository unchanged.
 
 If a result differs, copy the **View Patch** output (Ctrl+Shift+U, then choose **View Patch**) before reloading
 or leaving the page: a reload clears it, and it records which code path ran.
+
+### Automated check B
+
+The Release checks workflow also runs check B, with
+[`scripts/release-checks/web.mjs`](scripts/release-checks/web.mjs): headless Chromium on public vscode.dev in a new
+browser profile, View Patch installed from the Extensions view and switched to the pre-release for a pre-release
+version, then every step above and the RELEASING.md browser extras, which its report numbers `2a` (the empty
+view's title and buttons, **Show Environment**, and **Show View Patch Output**) and `5a` (no mode switch in the
+review menus). Its steps 1 to 5 and 8 and the extras count as written. Steps 6 and 7 need a GitHub sign-in:
+
+- With the repository secret `VSCODE_DEV_SIGN_IN_STATE`, a stored vscode.dev session
+  ([RELEASING.md](RELEASING.md#release-check-sign-ins)), the run opens the GitHub patch as written, and its PASS
+  counts. A session that expired or was revoked fails step 6 with "vscode.dev is not signed in to GitHub".
+- Without it, they run through the substitute used since 0.3.6: the `i/` and `w/` copy of the patch, saved in the
+  browser's private file storage, reported as PASS (substitute). That does not count; run steps 6 and 7 by hand in
+  a signed-in session, or with a signed-in browser profile on a workstation:
+
+```bash
+npm run check:b -- --sign-in --profile vscode-dev-profile
+npm run check:b -- --version 0.3.9 --channel regular --profile vscode-dev-profile
+```
+
+The first command opens a browser on that profile, waits until you have signed in to GitHub there, and runs
+nothing else; later runs reuse the profile. Keep the profile folder private: it holds that GitHub sign-in.
 
 ## 8. Cut the release
 
@@ -250,6 +311,22 @@ unzip -p "marketplace-${version}.vsix" extension.vsixmanifest | grep -c 'Code.Pr
 Expected: both digests equal the Summary digest, and the last command prints `0`: a regular package carries no
 pre-release property. Any mismatch: stop announcing the release and investigate the publish path.
 
+### Automated exit verification
+
+The Release checks workflow's exit job runs [`scripts/release-checks/exit.mjs`](scripts/release-checks/exit.mjs) on
+each successful Publish run, with the workflow's own token, which can read the job logs that hold step 2's Summary
+lines. It waits up to 30 minutes for the Marketplace to list the version, then requires every digest it found to
+be equal: the CI package job's, the publish job's, an Open VSX job's when one ran, the Marketplace listing's
+`VsixSha256` property, the Marketplace download, and for a tag the GitHub release asset's listed digest, its
+download, and the digest its notes name. The channel must agree everywhere, and a tag's release must be regular and
+not a draft. Its PASS completes steps 1 to 3. On a workstation it needs a token that can read the run's logs, such
+as the one the GitHub command-line tool `gh` holds; without one, it reports the job digests as NOT RUN and the
+verdict as INCOMPLETE:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
+```
+
 ## 10. Failure matrix
 
 | Symptom | Meaning | Action |
@@ -267,6 +344,10 @@ pre-release property. Any mismatch: stop announcing the release and investigate 
 | "already exists" when publishing | The version was used before | Choose the next patch version |
 | The GitHub release step fails after publishing | The Marketplace has the version, GitHub does not | Attach the verified CI artifact to a release by hand, then check its digest |
 | Publish jobs stay **Queued**, then the run fails with publishing skipped | A GitHub Actions incident; nothing was published | Confirm the Marketplace lacks the version and <https://www.githubstatus.com> shows recovery, then start a new run with the same pre-release choice |
+| The Release checks exit job is INCOMPLETE | It ran without a Publish run id or without a token, so the job digests were not compared | Start it by hand with the Publish run id, or compare the Summary lines by hand (section 9) |
+| The exit job fails at **Marketplace listing** | The Marketplace had not listed or validated the version within 30 minutes | Re-run the failed job later |
+| Automated check B fails step 6 with "vscode.dev is not signed in to GitHub" | The stored vscode.dev session expired or was revoked | Refresh `VSCODE_DEV_SIGN_IN_STATE` ([RELEASING.md](RELEASING.md#release-check-sign-ins)) and re-run the job, or run steps 6 and 7 by hand |
+| The job **Check A (Remote - SSH)** is skipped | The repository variable `VSCODE_SERVER_LICENSE` is not `accepted` | Run check A's remote parts by hand (section 6), or set the variable |
 
 ## 11. Release record
 
@@ -949,3 +1030,21 @@ shipped files from the tested `429fb68` is its version.
   title.
 - Recorded the release and its exit verification in section 12, filled in section 11's 0.3.9 row and section 3's
   release row, and set the status to COMPLETE with the verdict PASS.
+
+### 2026-11-26 - Release checks automated
+
+- Added the Release checks workflow and the scripts in `scripts/release-checks/`. After each successful Publish
+  run, it runs the exit verification (section 9), check A in a local test instance on Linux and Windows and, once
+  the owner accepts its licenses, in a Remote - SSH window (section 6), and check B on public vscode.dev, with steps
+  6 and 7 as written once a signed-in session is stored (section 7). Section 10 adds their failure rows, and
+  RELEASING.md their one-time setup.
+- Changed: section 2's PASS rule now takes their results step by step. A step reported as PASS counts as run as
+  written; a substitute counts only where its section says so, which is check A's steps 3, 3a, 4, and 5a from the
+  local test instance. Check B's file-backed substitute for steps 6 and 7 does not count.
+- Run against the published 0.3.9 before this change was committed: the exit verification of Publish run
+  `45899132142` without a token (INCOMPLETE as designed: five digests agree, and the job digests were not read);
+  check A in a local test instance on Linux (PASS, 8 steps through a substitute); the Remote - SSH dry run with a
+  throwaway SSH server (INCOMPLETE as designed: every step that needs a license not run); and check B (PASS, 2
+  steps through a substitute), plus each script's failure paths.
+- Not run yet: the workflow on GitHub, check A on Windows, check A in a Remote - SSH window, and check B or the
+  sign-in helper with a real GitHub sign-in.

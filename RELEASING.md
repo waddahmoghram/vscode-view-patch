@@ -91,6 +91,38 @@ Do not rerun this repository's Publish workflow for 0.3.7: the Marketplace versi
 Before advertising support for another editor, smoke-test the package in that editor; a registry listing alone
 does not prove compatibility.
 
+### Release check sign-ins
+
+The [Release checks](.github/workflows/release-checks.yml) workflow runs after every successful Publish run with no setup.
+Two parts of the [regular release runbook](RELEASE_RUNBOOK.md)'s checks need a sign-in or a license decision, and each is replaced by a substitute or skipped until it is set up.
+
+To run check B's steps 6 and 7 as written, which open a patch from a GitHub repository on vscode.dev:
+
+1. Create a GitHub machine account for these checks, with no access to your repositories, and use it for nothing else.
+   GitHub's Terms of Service allow one free machine account in addition to your free personal account, used only for automated tasks.
+1. On a computer with a display, in a clone of this repository with `npm ci` done, sign in with that account once:
+
+   ```bash
+   npm run check:b -- --sign-in --profile vscode-dev-profile --save-sign-in-state vscode-dev-state.json
+   ```
+
+   In the browser window that opens, sign in to GitHub and allow GitHub Repositories to use the account.
+   The command then saves the smallest copy of the session that still opens the patch in a new browser: first one with only vscode.dev's cookies, then one with every cookie, then the whole browser state.
+   It writes `vscode-dev-state.json` and `vscode-dev-state.json.b64`, and lists the cookie domains it kept.
+1. In **Settings** > **Secrets and variables** > **Actions** > **Secrets**, add the repository secret `VSCODE_DEV_SIGN_IN_STATE` with the contents of `vscode-dev-state.json.b64`.
+   When the command splits it into `vscode-dev-state.json.b64.1`, `.b64.2`, and so on, add those as `VSCODE_DEV_SIGN_IN_STATE`, `VSCODE_DEV_SIGN_IN_STATE_2`, and so on, up to four.
+1. Delete both files and the `vscode-dev-profile` folder.
+
+The files, the profile, and the secret hold a GitHub token for that account: anyone who reads them can act as it.
+To revoke it, open the account's **Settings** > **Applications** > **Authorized OAuth Apps**, revoke the app that the sign-in authorized, then delete the secret.
+If the command listed `github.com` among the cookies, the files also hold a github.com web session for the account: revoke it under **Settings** > **Sessions** as well.
+When a run reports that vscode.dev is not signed in to GitHub, repeat steps 2 to 4.
+Signing in with your own account also works for runs on your own computer, as section 7 of the runbook shows, but do not store your own session as a repository secret.
+
+To run check A in a real Remote - SSH window, set the repository variable `VSCODE_SERVER_LICENSE` to `accepted` in the **Variables** tab of the same settings page.
+That job installs Microsoft's Remote - SSH extension in a test editor and a VS Code Server on the runner, so setting the variable accepts the [VS Code Server license](https://code.visualstudio.com/license/server) and the [Remote - SSH license](https://marketplace.visualstudio.com/items/ms-vscode-remote.remote-ssh/license) for those runs.
+It needs no secret: each run makes its own Secure Shell (SSH) server and keys on the runner and connects to itself.
+
 ## Release channels
 
 The preview phase ended with the first regular release: 0.2.0 was published as a pre-release, 0.3.0 as a regular
@@ -170,6 +202,7 @@ The sequence used:
 This manual workflow does not create a GitHub release.
 If a run fails after publishing has started, inspect its publishing step and the Marketplace before retrying; never blindly rerun an already-published version.
 If source changes are needed after publication, use a new version.
+After each successful Publish run, the [Release checks](.github/workflows/release-checks.yml) workflow verifies the published package and runs checks A and B on the version the Marketplace serves; read its summary page.
 
 Before promoting `0.3.8` to regular `0.3.9`, repeat [manual check A](RELEASE_RUNBOOK.md#6-manual-check-a-a-real-remote-window) in a real remote window and [manual check B](RELEASE_RUNBOOK.md#7-manual-check-b-public-vscodedev) on public vscode.dev, using `0.3.8` for the runtime identity gate rather than the old campaign's version.
 Also check the version and host in the Patch Reviews title in local, remote, and browser windows, that the empty
@@ -181,6 +214,7 @@ Use a screen reader to confirm that file labels say "reviewed" or "not reviewed"
 "partial context"; automated label checks do not prove actual speech output.
 Automated tests do not replace these manual checks.
 The [release runbook](RELEASE_RUNBOOK.md#12-commands-actually-run) records them for 0.3.9.
+For later campaigns, the Release checks workflow runs checks A and B automatically, and the runbook's sections 6 and 7 say which of its results count and what is still checked by hand, such as the screen reader.
 
 ## Checking a package locally
 
@@ -209,11 +243,22 @@ while their parent tools still request vulnerable versions. Keep [`package-lock.
 Before removing an override, confirm the normal dependency tree is no longer vulnerable and repeat these checks,
 including the oldest supported editor.
 
-Before a regular public release, also try a complete-file review, a hunk-only review, refresh, and closing the last
-tab in an actual remote window, and a hunk-only review on vscode.dev for the web build. The
-[regular release runbook](RELEASE_RUNBOOK.md) gives the exact steps, expected results, and record. Provider-backed
-address tests cover path handling but are not an end-to-end remote connection or web-session test, and the
-installed-package smoke test uses a local window, not a remote extension host or vscode.dev.
+Before a regular public release, the [regular release runbook](RELEASE_RUNBOOK.md)'s checks try a complete-file
+review, a hunk-only review, refresh, and closing the last tab in a remote window, and hunk-only reviews on
+vscode.dev for the web build. The Release checks workflow runs them after each Publish run, and the runbook gives
+the exact steps, expected results, which automated results count, and the record. Provider-backed address tests
+cover path handling but are not an end-to-end remote connection or web-session test, and the installed-package
+smoke test uses a local window, not a remote extension host or vscode.dev. The same checks run from a workstation
+against a published version; on Linux without a display, prefix check A with `xvfb-run -a`:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
+npm run check:a -- --version 0.3.9 --channel regular
+npm run check:b -- --version 0.3.9 --channel regular
+```
+
+Each writes `report.md` and `report.json` under `.release-checks/` and exits with 0 for a pass, also with
+substitutes, 1 for a failed step, 2 for bad arguments, and 3 when a step could not run.
 
 ## Quality dashboard
 

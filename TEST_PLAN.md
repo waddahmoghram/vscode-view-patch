@@ -47,6 +47,7 @@ Each leg compiles both bundles, runs the unit tests, and runs the editor and Res
 | Packaging gate | `npm audit --include=dev`, then `vsce package` (with `--pre-release` when the Publish workflow asks); the package's SHA-256 (Secure Hash Algorithm, 256-bit) digest is recorded and the file is uploaded as the `view-patch-vsix` artifact. | `package` job: Linux, after the matrix passes. |
 | Installed package | [`scripts/test-package.mjs`](scripts/test-package.mjs) installs a built `.vsix` file into a fresh extensions folder with the VS Code command-line interface, then runs [`src/test/package`](src/test/package) in that VS Code with a fresh profile. An empty stub stands in for the development extension, so the installed copy is the only View Patch that loads. | `smoke` job: Linux, stable VS Code, after `package`, on the `view-patch-vsix` artifact. |
 | Publish gates | [`.github/workflows/publish.yml`](.github/workflows/publish.yml), described below. | Tag pushes and manual runs from `main`. |
+| Release checks | [`.github/workflows/release-checks.yml`](.github/workflows/release-checks.yml) runs the regular release runbook's checks on the published package. [`scripts/release-checks/exit.mjs`](scripts/release-checks/exit.mjs) compares every package digest and the channel across the Publish run's job logs, the GitHub release, and the Marketplace; [`remote.mjs`](scripts/release-checks/remote.mjs) runs check A on the Marketplace package in a local test instance, and over Remote - SSH when enabled; [`web.mjs`](scripts/release-checks/web.mjs) runs check B on public vscode.dev. Not a CI gate: the [runbook](RELEASE_RUNBOOK.md) says which of their results count. | After each successful Publish run, on Linux and Windows, and by hand. |
 | Inventory drift | `node scripts/test-inventory.mjs --check`, described in [Test inventory](#test-inventory). | Linux stable leg. |
 | Static analysis | CodeQL `security-and-quality` queries for JavaScript and TypeScript ([`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)). Not a release gate. | Pushes and pull requests to `main`, and weekly. |
 | Quality dashboard | [`scripts/quality-dashboard.mjs`](scripts/quality-dashboard.mjs), run by [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml), reports release-readiness rules, workflow history, test counts from CI logs, digest agreement, registry listings, each source's age, and the change in each aggregate number since the previous day's metrics snapshot, which it keeps as a 90-day artifact. A monitor, not a gate; see [Quality dashboard](RELEASING.md#quality-dashboard). | Daily, by hand, and after CI or Publish runs on `main` or a release tag. |
@@ -121,7 +122,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                                            | Test sources                        | Count |
 | ---------- | ----------------------------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   384 |
+| unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   393 |
 | editor     | Mocha in VS Code, `npm run test:editor`                           | `src/test/integration/**/*.test.ts` |    64 |
 | restricted | Isolated VS Code, `npm run test:restricted`                       | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web`                    | `src/test/web/suite.test.ts`        |     7 |
@@ -149,16 +150,21 @@ development dependencies cannot be loaded. Any other skip count on a matrix leg 
 
 ## Manual checks and known gaps
 
-Not automated:
+Not automated, or automated only once the repository owner sets it up:
 
 - A real remote window, such as one over Secure Shell (SSH): a complete-file review, a hunk-only review, refresh,
-  and closing the last tab. The provider-backed address test covers path handling with a stand-in file system,
+  and closing the last tab. The release checks run these with the Marketplace package in a local test instance
+  after each Publish run, and in a Remote - SSH window to the runner only when the owner accepts the licenses that
+  run needs ([RELEASING.md](RELEASING.md#release-check-sign-ins)). Until then, the parts that depend on a remote
+  extension host stay manual. The provider-backed address test covers path handling with a stand-in file system,
   not a remote extension host. The package layer installs the built file into a local desktop VS Code, which shows
   that it contains what it needs to activate and open reviews, but it runs in the local extension host too.
 - A public vscode.dev session with the extension installed from the Marketplace: hunk-only reviews from the
-  clipboard and from a patch file in a GitHub repository, and a saved review reopened after a reload. The web tests
-  load the development folder into a local VS Code for the Web server instead, and the package layer tests the
-  desktop host only.
+  clipboard and from a patch file in a GitHub repository, and a saved review reopened after a reload. The release
+  checks run all of it on public vscode.dev, but the patch in a GitHub repository needs a GitHub sign-in: without a
+  stored session they use a patch saved in the browser's private storage instead, and those two steps stay manual.
+  The web tests load the development folder into a local VS Code for the Web server instead, and the package layer
+  tests the desktop host only.
 - The Open VSX listing after an Open VSX publish. The quality dashboard reports the listed version, channel, and
   whether the namespace is verified, but nothing fails when they are wrong.
 - Visual rendering. The tests check document contents and extension state, not how VS Code draws the diff.
@@ -199,8 +205,9 @@ Known defects:
   are done.
 - Exit: the Publish run succeeded; the digests recorded by the packaging job and by each publishing job are equal;
   the Marketplace lists the new version on the intended channel; and when Open VSX publishing is enabled, its job
-  succeeded too. The quality dashboard re-checks the digests after each Publish run, adding the Marketplace's own
-  digest of the version that run published.
+  succeeded too. The Release checks workflow's exit job checks all of this after each Publish run, adding the
+  Marketplace's and the GitHub release's digests, and fails on any difference. The quality dashboard also re-checks
+  the digests after each Publish run, adding the Marketplace's own digest of the version that run published.
 
 ## Running each layer
 
@@ -227,4 +234,5 @@ node scripts/test-inventory.mjs --check
 first run downloads VS Code for the Web. `npm run test:package` takes the package's path, `view-patch.vsix` by
 default, and needs `npm run compile` for the suite, which the package does not contain; `VSCODE_TEST_VERSION`
 selects the VS Code it installs into. For the packaging gate, run `npm audit --include=dev`, `npx vsce package`,
-and `npx vsce ls`, as in [Checking a package locally](RELEASING.md#checking-a-package-locally).
+and `npx vsce ls`, as in [Checking a package locally](RELEASING.md#checking-a-package-locally). The release checks
+test a published version rather than this checkout; that section gives their commands too.

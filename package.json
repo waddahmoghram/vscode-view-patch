@@ -503,6 +503,9 @@
     "test:restricted": "node scripts/test-restricted.mjs",
     "test:web": "node scripts/test-web.mjs",
     "test:package": "node scripts/test-package.mjs",
+    "check:exit": "node scripts/release-checks/exit.mjs",
+    "check:a": "node scripts/release-checks/remote.mjs",
+    "check:b": "node scripts/release-checks/web.mjs",
     "package": "vsce package"
   },
   "devDependencies": {

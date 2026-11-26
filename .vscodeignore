@@ -4,6 +4,7 @@
 .vscode-test.mjs
 .dashboard/**
 .dashboard-history/**
+.release-checks/**
 .gitignore
 src/**
 scripts/**
