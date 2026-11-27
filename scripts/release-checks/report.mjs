@@ -175,16 +175,14 @@ export class CheckReport {
     annotations() {
         const failed = this.steps.filter(step => step.status === 'fail');
         if (failed.length > 0) {
-            return failed.map(step => `::error title=${escapeProperty(`${this.title}: ${step.id}. ${step.name}`)}::`
-                + escapeData(step.detail));
+            return failed.map(step => annotation('error', `${this.title}: ${step.id}. ${step.name}`, step.detail));
         }
         const notRun = this.steps.filter(step => step.status === 'not run');
         if (notRun.length === 0) {
             return [];
         }
         const listed = notRun.map(step => `${step.id}. ${step.name}: ${step.detail}`).join('\n');
-        return [`::warning title=${escapeProperty(`${this.title}: ${plural(notRun.length, 'step')} not run`)}::`
-            + escapeData(listed)];
+        return [annotation('warning', `${this.title}: ${plural(notRun.length, 'step')} not run`, listed)];
     }
 
     #add(id, name, status, detail) {
@@ -204,6 +202,11 @@ function cell(value) {
 
 function escapeHtml(text) {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** A GitHub Actions workflow command that annotates the run, such as `::error title=…::…`. */
+export function annotation(level, title, message) {
+    return `::${level} title=${escapeProperty(title)}::${escapeData(message)}`;
 }
 
 // The escaping that GitHub Actions workflow commands use, as in @actions/core.

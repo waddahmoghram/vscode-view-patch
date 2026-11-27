@@ -330,8 +330,16 @@ as the one the GitHub command-line tool `gh` holds; without one, it reports the 
 verdict as INCOMPLETE:
 
 ```bash
-GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
+GITHUB_TOKEN="$(gh auth token)" npm run check:exit
+GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run ID, its address, or the commit it built>
 ```
+
+The first command checks the newest successful Publish run from a tag push or `main`. To start the workflow by hand,
+choose **Run workflow** on its Actions page and leave **Publish run** and **Version** empty to check that run, or
+name another in **Publish run** the same ways as `--run`. A run's ID is the number after `/runs/` in its address,
+not the run number shown beside its name, such as `#12`. A value the script cannot read stops it before any check:
+it exits with code 2, writes no report, and adds the annotation "Exit verification could not start", which says
+why.
 
 ## 10. Failure matrix
 
@@ -350,7 +358,9 @@ GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
 | "already exists" when publishing | The version was used before | Choose the next patch version |
 | The GitHub release step fails after publishing | The Marketplace has the version, GitHub does not | Attach the verified CI artifact to a release by hand, then check its digest |
 | Publish jobs stay **Queued**, then the run fails with publishing skipped | A GitHub Actions incident; nothing was published | Confirm the Marketplace lacks the version and <https://www.githubstatus.com> shows recovery, then start a new run with the same pre-release choice |
-| The Release checks exit job is INCOMPLETE | It ran without a Publish run id or without a token, so the job digests were not compared | Start it by hand with the Publish run id, or compare the Summary lines by hand (section 9) |
+| The Release checks exit job is INCOMPLETE | It ran with a version but no Publish run, or without a token, so the job digests were not compared | Start it by hand with the Publish run, or with **Publish run** and **Version** empty for the newest one, or compare the Summary lines by hand (section 9) |
+| The exit job fails within seconds with the annotation "Exit verification could not start", and every check job is skipped | It could not read an input, such as a Publish run that is not an ID, an address, or a commit hash, or a version not written like `0.3.9`; it checked nothing and wrote no report | Correct that field, or leave it empty, and start the workflow again (section 9) |
+| The exit job fails at **Publish run** with "no successful Publish run from a tag push or main built commit …" | No Publish run published that commit: a push to `main` does not start one; only a release tag or a run started by hand from `main` does | Name a published commit or its run, or leave **Publish run** empty for the newest (section 9) |
 | The exit job fails at **Marketplace listing** | The Marketplace had not listed or validated the version within 30 minutes | Re-run the failed job later |
 | Automated check B fails step 6 with "vscode.dev is not signed in to GitHub" | The stored vscode.dev session expired or was revoked | Refresh `VSCODE_DEV_SIGN_IN_STATE` ([RELEASING.md](RELEASING.md#release-check-sign-ins)) and re-run the job, or run steps 6 and 7 by hand |
 | The job **Check A (Remote - SSH)** is skipped | The repository variable `VSCODE_SERVER_LICENSE` is not `accepted` | Run check A's remote parts by hand (section 6), or set the variable |
@@ -1093,3 +1103,16 @@ shipped files from the tested `429fb68` is its version.
 - Changed, by the owner's choice: the Remote - SSH job never fails the workflow, so that a new VS Code or
   Remote - SSH release that breaks the job cannot hold up a release. This reverses the gate that the entry above
   set after one run. Its PASS still counts as check A as written, and section 10 says what to do after a failure.
+
+### 2026-11-26 - Exit verification takes more kinds of input
+
+- Run `45928606908`, started by hand on `d017902`, failed after 18 seconds. Its exit verification exited with code
+  2, which means it rejected its inputs, so it checked nothing and wrote no report, and every check job was
+  skipped. The workflow's message still said that the report was in the summary. Which input it rejected is in the
+  job's log, which needs a GitHub sign-in. The script then took only a numeric run ID, or a version and channel:
+  an empty form, a run's address, a commit hash, surrounding spaces, and `v0.3.9` were all rejected the same way.
+  Nothing about View Patch or its release was wrong.
+- Changed: `--run` and **Publish run** also take a run's address or the commit it built, and ignore surrounding
+  spaces; `--version` also takes a leading `v`; with neither given, the newest successful Publish run from a tag
+  push or `main` is checked (section 9). A rejected input or a crash now adds an annotation that says why, and the
+  workflow's message says whether a report exists (section 10).

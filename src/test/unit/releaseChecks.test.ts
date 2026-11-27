@@ -1,4 +1,5 @@
 import * as assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -60,13 +61,16 @@ function listing(versions: string[]): Json {
     };
 }
 
+// The Publish run of tag v1.2.3, as the GitHub API returns it.
+const TAG_RUN = {
+    id: 7, path: '.github/workflows/publish.yml', status: 'completed', conclusion: 'success', event: 'push',
+    head_branch: 'v1.2.3', head_sha: '889b167dfd1f', run_attempt: 1, created_at: '2026-11-26T21:30:00Z',
+};
+
 // The GitHub, release, and Marketplace answers for a tag run of 1.2.3 whose every digest is DIGEST.
 function routes(overrides: Record<string, () => Response> = {}): Record<string, () => Response> {
     return {
-        [`${API}/actions/runs/7`]: () => json({
-            id: 7, path: '.github/workflows/publish.yml', status: 'completed', conclusion: 'success', event: 'push',
-            head_branch: 'v1.2.3', head_sha: '889b167dfd1f', run_attempt: 1,
-        }),
+        [`${API}/actions/runs/7`]: () => json(TAG_RUN),
         [`${API}/actions/runs/7/jobs?per_page=100`]: () => json({
             jobs: [
                 { id: 11, name: 'verify / package', status: 'completed', conclusion: 'success' },
@@ -267,6 +271,62 @@ describe('release exit verification', () => {
         assert.equal(settle.status, 'fail');
         assert.match(settle.detail,
             /the channel differs: --version and --channel says pre-release, tag v1\.2\.3 says regular/);
+    });
+
+    test('reads --run as a run ID, its address, or a commit hash, and --version with a leading v', async () => {
+        const { parseRunSelector, parseVersion } = await loadExit();
+        assert.deepEqual(parseRunSelector(' 42 '), { runId: '42' });
+        assert.deepEqual(parseRunSelector('https://github.com/o/r/actions/runs/45917387504/job/140239953449'),
+            { runId: '45917387504' });
+        assert.deepEqual(parseRunSelector('D017902'), { commit: 'd017902' });
+        assert.deepEqual(parseRunSelector('7654321'), { runId: '7654321', commit: '7654321' });
+        assert.throws(() => parseRunSelector('run 12'), /^Error: --run takes a Publish run's ID, .* not "run 12"$/);
+        assert.equal(parseVersion(' v0.3.9'), '0.3.9');
+        assert.throws(() => parseVersion('0.3'), /--version must look like 1\.2\.3, not "0\.3"/);
+    });
+
+    test('picks the newest successful Publish run from a tag push or main, or the newest that built a commit',
+        async () => {
+            const runs = `${API}/actions/workflows/publish.yml/runs?status=success&per_page=100`;
+            const elsewhere = { ...TAG_RUN, id: 9, event: 'workflow_dispatch', head_branch: 'vp/try',
+                head_sha: '1234567abc', created_at: '2026-11-27T02:00:00Z' };
+            const answers = routes({ [runs]: () => json({ workflow_runs: [elsewhere, TAG_RUN] }) });
+            const cases: [Json, string][] = [[{ latest: true }, ''], [{ commit: '889b167' }, ' that built 889b167']];
+            for (const [options, picked] of cases) {
+                const { report } = await verify(options, answers);
+                assert.deepEqual([report.steps[0].status, report.target['Publish run']],
+                    ['pass', '7, attempt 1, tag v1.2.3 at 889b167']);
+                assert.ok(report.steps[0].detail.startsWith(`picked as the newest successful Publish run${picked}; `),
+                    report.steps[0].detail);
+            }
+
+            const { report: unknown } = await verify({ commit: '1234567' }, answers);
+            assert.deepEqual([unknown.steps[0].status, unknown.steps[0].detail], ['fail', 'no successful Publish run '
+                + 'from a tag push or main built commit 1234567 (2 successful Publish runs checked)']);
+            assert.deepEqual(outcomes(unknown).slice(1).map(([, status]) => status), Array(6).fill('not run'));
+            assert.equal(unknown.annotations().length, 1);
+
+            // An all-digit hash is read as a run ID first; when no run has that ID, it is the commit.
+            const digits = routes({ [runs]: () => json({ workflow_runs: [{ ...TAG_RUN, head_sha: '7654321fed' }] }) });
+            const { report: fallback } = await verify({ runId: '7654321', commit: '7654321' }, digits);
+            assert.deepEqual([fallback.steps[0].status, fallback.target['Publish run']],
+                ['pass', '7, attempt 1, tag v1.2.3 at 7654321']);
+        });
+
+    test('stops with exit code 2 and no report on an unreadable --run, annotated under GitHub Actions', () => {
+        const out = fs.mkdtempSync(path.join(os.tmpdir(), 'view-patch-exit-'));
+        const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_ACTIONS: 'true' };
+        delete env.GITHUB_STEP_SUMMARY;
+        delete env.GITHUB_OUTPUT;
+        try {
+            const result = spawnSync(process.execPath, [path.join(scripts, 'exit.mjs'), '--run', 'run 12', '--out', out],
+                { env, encoding: 'utf8' });
+            assert.equal(result.status, 2, result.stderr);
+            assert.match(result.stdout, /^::error title=Exit verification could not start::--run takes a Publish run's/m);
+            assert.deepEqual(fs.readdirSync(out), []);
+        } finally {
+            fs.rmSync(out, { recursive: true, force: true });
+        }
     });
 });
 

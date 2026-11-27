@@ -17,15 +17,19 @@ on:
   workflow_dispatch:
     inputs:
       publish_run:
-        description: Publish run id to verify; leave empty to check a version without its job digests
+        description: >-
+          Publish run to verify: its ID (the number after /runs/ in its address), its address, or the commit it built.
+          Leave empty for the newest successful Publish run, unless a version is given.
         type: string
         required: false
       version:
-        description: Version to check; leave empty for the version that Publish run published
+        description: >-
+          Version to check, such as 0.3.9. With no Publish run, it is checked without its job digests; leave empty
+          for the version the Publish run published.
         type: string
         required: false
       channel:
-        description: Its channel; required when no Publish run id is given
+        description: Its channel; required when a version is given without a Publish run
         type: choice
         options: [auto, regular, pre-release]
         default: auto
@@ -91,8 +95,17 @@ jobs:
         if: steps.verify.outputs.code != '0'
         env:
           CODE: ${{ steps.verify.outputs.code }}
+        # Exit code 2 means the inputs were rejected before any check; then, as after a crash, no report exists.
         run: |
-          echo "::error::The exit verification did not pass (exit code ${CODE}); its report is in the summary."
+          if [ "${CODE}" = 2 ]; then
+            echo "::error::The exit verification rejected its inputs and checked nothing (exit code 2);" \
+              "the annotation \"Exit verification could not start\" says why."
+          elif [ -e "${RUNNER_TEMP}/release-checks/exit/report.md" ]; then
+            echo "::error::The exit verification did not pass (exit code ${CODE}); its report is in the summary."
+          else
+            echo "::error::The exit verification stopped without a report (exit code ${CODE});" \
+              "the annotation \"Exit verification stopped\" says why."
+          fi
           exit 1
 
   check-b:

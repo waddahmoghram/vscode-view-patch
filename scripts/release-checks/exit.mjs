@@ -1,8 +1,12 @@
 // Automates the regular release runbook's exit verification (RELEASE_RUNBOOK.md section 9) for one Publish run,
 // and checks a pre-release run the same way:
 //
-//   node scripts/release-checks/exit.mjs --run <id> [--wait-minutes <n>] [--out <dir>]
+//   node scripts/release-checks/exit.mjs [--run <run>] [--wait-minutes <n>] [--out <dir>]
 //   node scripts/release-checks/exit.mjs --version <x.y.z> --channel regular|pre-release [--tag] [--out <dir>]
+//
+// --run names a Publish run by its ID, the number after /runs/ in its address, by that address, or by the hash of
+// the commit it built. Without --run or --version, the run is the newest successful Publish run that published, from
+// a tag push or from main. --version without --run checks that version without a Publish run.
 //
 // The run must be a successful Publish run. Its CI package and publish jobs print the package's SHA-256 digest in
 // their logs, which only a GitHub token with `actions: read` can read: the release-checks workflow passes its own
@@ -12,17 +16,18 @@
 //
 // Environment: GITHUB_REPOSITORY (default waddahmoghram/vscode-view-patch), GITHUB_TOKEN, GITHUB_API_URL, and the
 // GitHub Actions files GITHUB_STEP_SUMMARY and GITHUB_OUTPUT (version, channel, sha256, and tag are written there).
-// Writes report.json and report.md to --out (default .release-checks/exit). Exit codes as in report.mjs.
+// Writes report.json and report.md to --out (default .release-checks/exit). Exit codes as in report.mjs; an input
+// that cannot be read exits 2 before any request, with an error annotation when GitHub Actions runs it.
 
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { readZip } from '@vscode/vsce/out/zip.js';
-import { readDigestTargets, summarizeJobs } from '../quality-dashboard.mjs';
-import { CheckReport, EXIT, errorText } from './report.mjs';
+import { readDigestTargets, summarizeJobs, summarizeRuns } from '../quality-dashboard.mjs';
+import { CheckReport, EXIT, annotation, errorText } from './report.mjs';
 
 const PUBLISHER = 'waddahmoghram';
 const NAME = 'view-patch';
@@ -42,6 +47,44 @@ export const vspackageUrl = version => `${GALLERY}/publishers/${PUBLISHER}/vsext
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const short = digest => `${digest.slice(0, 8)}…${digest.slice(-6)}`;
+const RUN_ADDRESS = /\/actions\/runs\/(\d+)(?:[/?#]|$)/;
+
+/**
+ * Reads what --run names, ignoring surrounding spaces: a run's ID, or its address, which holds the ID after /runs/,
+ * as { runId }; or the hash of the commit that a Publish run built, at least 7 characters, as { commit }. A short
+ * hash can be all digits, so a number of 7 to 40 digits is both, and the run lookup falls back to the commit.
+ */
+export function parseRunSelector(text) {
+    const value = String(text).trim();
+    const runId = /^\d+$/.test(value) ? value : RUN_ADDRESS.exec(value)?.[1];
+    const commit = /^[\da-f]{7,40}$/i.test(value) ? value.toLowerCase() : undefined;
+    if (!runId && !commit) {
+        throw new Error(`--run takes a Publish run's ID, the number after /runs/ in its address, the address itself,`
+            + ` or the hash of the commit it built, not "${value}"`);
+    }
+    return { ...(runId ? { runId } : {}), ...(commit ? { commit } : {}) };
+}
+
+/** A version given as 1.2.3 or v1.2.3, ignoring surrounding spaces. */
+export function parseVersion(text) {
+    const value = String(text).trim();
+    const version = value.replace(/^v/i, '');
+    if (!VERSION.test(version)) {
+        throw new Error(`--version must look like 1.2.3, not "${value}"`);
+    }
+    return version;
+}
+
+/**
+ * The newest successful Publish run that published, from a tag push or from main, among a workflow's runs as the
+ * GitHub API lists them; with `commit`, the newest that built a commit whose hash starts with it.
+ */
+export function findPublishRun(rawRuns, commit) {
+    const ids = summarizeRuns(rawRuns, { publish: true }).runs
+        .filter(run => run.conclusion === 'success' && (!commit || String(run.sha).toLowerCase().startsWith(commit)))
+        .map(run => run.id);
+    return rawRuns.find(run => run.id === ids[0]);
+}
 
 /** The tag that a Publish run was started by, such as `v0.3.9`, or undefined for a run started by hand. */
 export function tagOf(run) {
@@ -148,18 +191,20 @@ function client({ fetchImpl, sleep }) {
                 await sleep(5_000 * attempt);
                 continue;
             }
-            throw new Error(`${new URL(url).host} returned ${response.status} for ${new URL(url).pathname}`);
+            const error = new Error(`${new URL(url).host} returned ${response.status} for ${new URL(url).pathname}`);
+            throw Object.assign(error, { status: response.status });
         }
     };
 }
 
 /**
- * Runs every step and returns the report and what it settled. `fetch`, `readManifest(bytes)`, `sleep(ms)`, and
- * `now()` can be replaced for tests.
+ * Runs every step and returns the report and what it settled. The Publish run is `runId`, else the newest successful
+ * one that built `commit`, else, with `latest`, the newest successful one; a `runId` that names no run falls back to
+ * `commit` when both are given. `fetch`, `readManifest(bytes)`, `sleep(ms)`, and `now()` can be replaced for tests.
  */
 export async function verifyRelease({
-    repository = 'waddahmoghram/vscode-view-patch', token, runId, version, channel, tag: tagFlag = false,
-    waitMinutes = 0, apiUrl = 'https://api.github.com', fetch: fetchImpl = globalThis.fetch,
+    repository = 'waddahmoghram/vscode-view-patch', token, runId, commit, latest = false, version, channel,
+    tag: tagFlag = false, waitMinutes = 0, apiUrl = 'https://api.github.com', fetch: fetchImpl = globalThis.fetch,
     readManifest = readVsixManifest, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
     now = () => Date.now(), pollMs = 60_000,
 }) {
@@ -176,33 +221,60 @@ export async function verifyRelease({
         headers: { 'User-Agent': 'view-patch-release-checks' },
     })).arrayBuffer());
 
+    const wanted = Boolean(runId || commit || latest);
     const report = new CheckReport({
         check: 'exit',
         title: 'Exit verification',
         target: {
             'View Patch': 'unknown',
-            'Publish run': runId ? String(runId) : 'none given',
+            'Publish run': runId ? String(runId)
+                : commit ? `the newest successful one that built ${commit}`
+                    : latest ? 'the newest successful one' : 'none given',
             Repository: repository,
         },
     });
     const digests = [];
     let run;
+    let picked;
     let jobs;
     let recorded;
 
-    if (runId) {
+    const findRun = async () => {
+        if (runId) {
+            try {
+                return await github(`/repos/${repository}/actions/runs/${runId}`);
+            } catch (error) {
+                if (!commit || error.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+        const listed = await github(`/repos/${repository}/actions/workflows/${path.posix.basename(PUBLISH_WORKFLOW)}`
+            + '/runs?status=success&per_page=100');
+        const found = findPublishRun(listed.workflow_runs ?? [], commit);
+        if (!found) {
+            const checked = listed.workflow_runs?.length ?? 0;
+            throw new Error(`no successful Publish run from a tag push or main ${commit ? `built commit ${commit}`
+                : 'was found'} (${checked} successful Publish run${checked === 1 ? '' : 's'} checked)`);
+        }
+        picked = `the newest successful Publish run${commit ? ` that built ${commit}` : ''}`;
+        return found;
+    };
+
+    if (wanted) {
         await report.run('1', 'Publish run', async () => {
-            run = await github(`/repos/${repository}/actions/runs/${runId}`);
+            run = await findRun();
+            const id = run.id ?? runId;
             if (run.path !== PUBLISH_WORKFLOW) {
-                throw new Error(`run ${runId} belongs to ${run.path ?? run.name}, not ${PUBLISH_WORKFLOW}`);
+                throw new Error(`run ${id} belongs to ${run.path ?? run.name}, not ${PUBLISH_WORKFLOW}`);
             }
             const started = tagOf(run) ? `tag ${tagOf(run)}` : `${run.event} on ${run.head_branch}`;
-            report.target['Publish run'] = `${run.id}, attempt ${run.run_attempt ?? 1}, ${started} at `
+            report.target['Publish run'] = `${id}, attempt ${run.run_attempt ?? 1}, ${started} at `
                 + `${run.head_sha?.slice(0, 7)}`;
             if (run.status !== 'completed' || run.conclusion !== 'success') {
-                throw new Error(`run ${runId} is ${run.status}${run.conclusion ? `, ${run.conclusion}` : ''}`);
+                throw new Error(`run ${id} is ${run.status}${run.conclusion ? `, ${run.conclusion}` : ''}`);
             }
-            const listed = await github(`/repos/${repository}/actions/runs/${runId}/jobs?per_page=100`);
+            const listed = await github(`/repos/${repository}/actions/runs/${id}/jobs?per_page=100`);
             jobs = summarizeJobs(listed.jobs ?? []);
             const outcome = name => jobs.find(job => job.name === name)?.conclusion ?? 'missing';
             for (const name of ['verify / package', 'publish']) {
@@ -213,11 +285,12 @@ export async function verifyRelease({
             if (!['success', 'skipped', 'missing'].includes(outcome('open-vsx'))) {
                 throw new Error(`job "open-vsx" is ${outcome('open-vsx')}`);
             }
-            return `${jobs.length} jobs; "verify / package" and "publish" succeeded, "open-vsx" ${outcome('open-vsx')}`;
+            return `${picked ? `picked as ${picked}; ` : ''}${jobs.length} jobs; "verify / package" and "publish" `
+                + `succeeded, "open-vsx" ${outcome('open-vsx')}`;
         });
     }
 
-    if (!runId) {
+    if (!wanted) {
         report.notRun('2', 'Job digests', 'no Publish run was given (--run)');
     } else if (!jobs) {
         report.notRun('2', 'Job digests', 'the Publish run could not be checked');
@@ -248,7 +321,16 @@ export async function verifyRelease({
         });
     }
 
-    const tag = runId ? tagOf(run) : (tagFlag && version ? `v${version}` : undefined);
+    const tag = wanted ? tagOf(run) : (tagFlag && version ? `v${version}` : undefined);
+    const laterSteps = [['3', 'GitHub release'], ['4', 'Marketplace listing'], ['5', 'Marketplace download'],
+        ['6', 'Digest agreement']];
+    // Without the run or --version, nothing can name the version; step 1's failure says why.
+    if (wanted && !run && !version) {
+        for (const [id, name] of [['2a', 'Version and channel'], ...laterSteps]) {
+            report.notRun(id, name, 'the Publish run could not be read, so the version is unknown');
+        }
+        return { report, settled: undefined };
+    }
     let settled;
     const resolved = await report.run('2a', 'Version and channel', async () => {
         const published = recorded?.publishedVersion;
@@ -266,8 +348,7 @@ export async function verifyRelease({
             ...settled.channelSources])].join(', ')}`;
     });
     if (!resolved) {
-        for (const [id, name] of [['3', 'GitHub release'], ['4', 'Marketplace listing'], ['5', 'Marketplace download'],
-            ['6', 'Digest agreement']]) {
+        for (const [id, name] of laterSteps) {
             report.notRun(id, name, 'the version and channel are not settled');
         }
         return { report, settled: undefined };
@@ -302,7 +383,7 @@ export async function verifyRelease({
             return `regular, published ${release.published_at}; ${ASSET} ${asset.size} bytes; `
                 + 'its listed digest, a download, and the notes recorded';
         });
-    } else if (runId && !run) {
+    } else if (wanted && !run) {
         report.notRun('3', 'GitHub release', 'the Publish run could not be read, so its tag is unknown');
     } else {
         report.note('No GitHub release step: only a tag push creates a release.');
@@ -377,8 +458,19 @@ export async function verifyRelease({
     return { report, settled: { ...settled, tag, sha256: agreed } };
 }
 
+/** Prints why the verification stopped before writing a report, as an annotation too when GitHub Actions runs it. */
+function stopped(title, error, code) {
+    console.error(`exit.mjs: ${errorText(error)}`);
+    if (process.env.GITHUB_ACTIONS === 'true') {
+        console.log(annotation('error', title, errorText(error)));
+    }
+    return code;
+}
+
 async function main() {
     let values;
+    let selector = {};
+    let version;
     try {
         ({ values } = parseArgs({
             options: {
@@ -390,31 +482,29 @@ async function main() {
                 out: { type: 'string', default: path.join('.release-checks', 'exit') },
             },
         }));
-        if (values.run !== undefined && !/^\d+$/.test(values.run)) {
-            throw new Error(`--run must be a workflow run id, not "${values.run}"`);
+        if (values.run?.trim()) {
+            selector = parseRunSelector(values.run);
         }
-        if (values.version !== undefined && !VERSION.test(values.version)) {
-            throw new Error(`--version must look like 1.2.3, not "${values.version}"`);
+        if (values.version?.trim()) {
+            version = parseVersion(values.version);
         }
         if (values.channel !== undefined && !CHANNELS.includes(values.channel)) {
             throw new Error(`--channel must be regular or pre-release, not "${values.channel}"`);
-        }
-        if (!values.run && !values.version) {
-            throw new Error('give --run, or --version with --channel');
         }
         if (!(Number(values['wait-minutes']) >= 0)) {
             throw new Error(`--wait-minutes must be a number of minutes, not "${values['wait-minutes']}"`);
         }
     } catch (error) {
-        console.error(`exit.mjs: ${errorText(error)}`);
-        return EXIT.usage;
+        return stopped('Exit verification could not start', error, EXIT.usage);
     }
     const { report, settled } = await verifyRelease({
         repository: process.env.GITHUB_REPOSITORY || undefined,
         token: process.env.GITHUB_TOKEN || undefined,
         apiUrl: process.env.GITHUB_API_URL || undefined,
-        runId: values.run,
-        version: values.version,
+        runId: selector.runId,
+        commit: selector.commit,
+        latest: !selector.runId && !selector.commit && !version,
+        version,
         channel: values.channel,
         tag: values.tag,
         waitMinutes: Number(values['wait-minutes']),
@@ -427,9 +517,14 @@ async function main() {
     return code;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    process.exitCode = await main().catch(error => {
-        console.error(`exit.mjs: ${errorText(error)}`);
-        return EXIT.fail;
-    });
+function isMain() {
+    try {
+        return realpathSync(process.argv[1] ?? '') === fileURLToPath(import.meta.url);
+    } catch {
+        return false;
+    }
+}
+
+if (isMain()) {
+    process.exitCode = await main().catch(error => stopped('Exit verification stopped', error, EXIT.fail));
 }

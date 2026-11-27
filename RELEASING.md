@@ -253,13 +253,14 @@ smoke test uses a local window, not a remote extension host or vscode.dev. The s
 against a published version; on Linux without a display, prefix check A with `xvfb-run -a`:
 
 ```bash
-GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
+GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run ID, its address, or the commit it built>
 npm run check:a -- --version 0.3.9 --channel regular
 npm run check:b -- --version 0.3.9 --channel regular
 ```
 
 Each writes `report.md` and `report.json` under `.release-checks/` and exits with 0 for a pass, also with
-substitutes, 1 for a failed step, 2 for bad arguments, and 3 when a step could not run.
+substitutes, 1 for a failed step, 2 for bad arguments, and 3 when a step could not run. Without `--run`,
+`check:exit` checks the newest successful Publish run from a tag push or `main`.
 
 ## Quality dashboard
 
