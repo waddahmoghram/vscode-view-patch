@@ -174,7 +174,7 @@ summary, and artifact need.
   Secure Shell (SSH) server and keys made for that run, with the package installed on the remote side. Its PASS is
   check A as written. It runs only when the repository variable `VSCODE_SERVER_LICENSE` is `accepted`, because it
   installs the Remote - SSH extension and a VS Code Server ([RELEASING.md](RELEASING.md#release-check-sign-ins)).
-  It has not run yet, so until it passes once, its failure does not fail the workflow.
+  It passed its first run (section 13), so a failure there fails the workflow.
 - **Check A (local test instance)** runs the same steps in a local window, on Linux and on Windows, so its report
   marks each step in the window as PASS (substitute). Of those, steps 3, 3a, 4, and 5a count, as the substitute's
   steps 3 and 4 did for 0.3.8 (section 12): they do not depend on where the extension host runs. The identity
@@ -1072,3 +1072,14 @@ shipped files from the tested `429fb68` is its version.
   skipped, because the repository variable `VSCODE_SERVER_LICENSE` is not set.
 - Changed: a failure of check A on Windows now fails the workflow. The Remote - SSH job, which has not run yet,
   takes over the rule that a job's failure does not fail the workflow until it passes once (section 6).
+
+### 2026-11-26 - Check A passed in a Remote - SSH window
+
+- The repository variable `VSCODE_SERVER_LICENSE` is now `accepted`, which accepts the VS Code Server and
+  Remote - SSH licenses for the Remote - SSH job's runs ([RELEASING.md](RELEASING.md#release-check-sign-ins)).
+- Run `45926825618`, started by hand on `87eb859`, passed with every job, including the Remote - SSH job's first
+  run: its check step took 48 seconds, and no job has an annotation, so no step failed or was left not run. The run
+  took about two and a half minutes; check A on Windows, at 103 seconds, was its longest job.
+- Changed: a failure of the Remote - SSH job now fails the workflow (section 6). After each Publish run, every
+  step of check A now runs as written, and so does every step of check B except 6 and 7 until a vscode.dev sign-in
+  is stored; the screen-reader check stays manual.
