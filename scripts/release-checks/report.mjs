@@ -158,8 +158,33 @@ export class CheckReport {
         for (const step of this.steps) {
             console.log(`${STATUS_TEXT[step.status].padEnd(17)} ${step.id}. ${step.name}: ${step.detail}`);
         }
+        // Annotations are readable without the sign-in that a job's log, summary, and artifacts need.
+        if (process.env.GITHUB_ACTIONS === 'true') {
+            for (const line of this.annotations()) {
+                console.log(line);
+            }
+        }
         console.log(`${this.title}: ${text}. Report: ${path.join(outDir, 'report.md')}`);
         return exitCode;
+    }
+
+    /**
+     * GitHub Actions workflow commands that annotate the run: an error for each failed step, or, when none failed,
+     * one warning that lists the steps that did not run.
+     */
+    annotations() {
+        const failed = this.steps.filter(step => step.status === 'fail');
+        if (failed.length > 0) {
+            return failed.map(step => `::error title=${escapeProperty(`${this.title}: ${step.id}. ${step.name}`)}::`
+                + escapeData(step.detail));
+        }
+        const notRun = this.steps.filter(step => step.status === 'not run');
+        if (notRun.length === 0) {
+            return [];
+        }
+        const listed = notRun.map(step => `${step.id}. ${step.name}: ${step.detail}`).join('\n');
+        return [`::warning title=${escapeProperty(`${this.title}: ${plural(notRun.length, 'step')} not run`)}::`
+            + escapeData(listed)];
     }
 
     #add(id, name, status, detail) {
@@ -179,4 +204,13 @@ function cell(value) {
 
 function escapeHtml(text) {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// The escaping that GitHub Actions workflow commands use, as in @actions/core.
+function escapeData(text) {
+    return String(text).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+function escapeProperty(text) {
+    return escapeData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
 }

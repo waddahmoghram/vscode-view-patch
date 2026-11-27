@@ -166,8 +166,9 @@ successful Publish run, and by hand from the **Actions** tab, with
 Marketplace, makes a fresh clone and both patches, installs the package into an empty profile, and runs this
 section's steps and the RELEASING.md extras through View Patch's commands, with the counts before and after. Its
 report numbers the extras `1a` (the title), `3a` (switching modes with a second review open), and `5a` (**Show View
-Patch Output**). Each job adds its step table to the run's summary and keeps it, with View Patch's log, as an
-artifact.
+Patch Output**). Each job adds its step table to the run's summary, keeps it with View Patch's log as an artifact,
+and adds an annotation to the run for each failed step, which GitHub lists without the sign-in that the log,
+summary, and artifact need.
 
 - **Check A (Remote - SSH)** connects a VS Code test instance through Remote - SSH to the runner itself, through a
   Secure Shell (SSH) server and keys made for that run, with the package installed on the remote side. Its PASS is
@@ -178,8 +179,8 @@ artifact.
   steps 3 and 4 did for 0.3.8 (section 12): they do not depend on where the extension host runs. The identity
   gate, the title, and steps 2 and 5 still need a real remote window: the Remote - SSH job, or a person following
   this section, with its preflight and after-check. On Windows, step 1a also shows a local window's title,
-  `v<version> · local Windows`. That job has not run yet, so until it passes once, its failure does not fail the
-  workflow.
+  `v<version> · local Windows`. That job's first run failed before VS Code started (section 13), so until it passes
+  once, its failure does not fail the workflow.
 
 To run it on a workstation, from a clone with `npm ci` done (on Linux without a display, prefix `xvfb-run -a`):
 
@@ -357,7 +358,7 @@ GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
 | 0.3.0 | regular | 2026-11-10 | `1f89c6c` | not recorded | not recorded | not comparable: rebuilt at publish |
 | 0.3.5 | regular | 2026-11-11 | `82110ca` | PASS on 0.3.4, 2026-11-11 | PASS on 0.3.4, 2026-11-11 | `661153806417c5cfc8fe5000a0cc5ee0b5e1a646ae18dd43bf3def316693a3c6`, also equal to the GitHub release asset |
 | 0.3.7 | regular | 2026-11-24 | `658e11e` | PASS on 0.3.6, 2026-11-24 | PASS on 0.3.6, 2026-11-24 | `185c6d9881a67dcd65467e5dd5a6003ba6ed3f83d048bc0d1160553101639de4`, also equal to the GitHub release asset |
-| 0.3.9 | regular | 2026-11-26 | `889b167` | PASS on 0.3.8, 2026-11-26, steps 3 and 4 in a substitute | PASS on 0.3.8, 2026-11-26 | `2f240c662445a8b5d9e5b428bf4fbdd62ebe1a62b5c89a1112f30b6f58c1e46d` from the publish job and the Marketplace, also equal to the GitHub release asset; the packaging job's log was not read |
+| 0.3.9 | regular | 2026-11-26 | `889b167` | PASS on 0.3.8, 2026-11-26, steps 3 and 4 in a substitute | PASS on 0.3.8, 2026-11-26 | `2f240c662445a8b5d9e5b428bf4fbdd62ebe1a62b5c89a1112f30b6f58c1e46d` from the publish job and the Marketplace, also equal to the GitHub release asset; the packaging job's log was not read before the release, and Release checks run `45917387504` found the same digest there later that day |
 
 Pre-releases need no manual checks; [RELEASING.md](RELEASING.md#release-channels) lists them.
 
@@ -1049,3 +1050,16 @@ shipped files from the tested `429fb68` is its version.
   steps through a substitute), plus each script's failure paths.
 - Not run yet: the workflow on GitHub, check A on Windows, check A in a Remote - SSH window, and check B or the
   sign-in helper with a real GitHub sign-in.
+
+### 2026-11-26 - First Release checks run
+
+- Run `45917387504`, started by hand on `e8c03a4` for Publish run `45899132142`, passed. Its exit verification,
+  check B, and check A in a local test instance on Linux passed; each script exits 0 only when every step passes.
+  The exit verification read the packaging and publish jobs' digests with the workflow's token for the first time
+  and found them equal to the GitHub release's and the Marketplace's, which section 11's 0.3.9 row now records.
+- Check A on Windows failed, which section 6 allows until it passes once. Its editor step looked for VS Code's
+  `package.json` in `resources/app` beside `Code.exe`. The 1.148.0 Windows archive keeps it in a folder named after
+  the commit, `661626d0e7/resources/app`, as recent Windows archives do (microsoft/vscode#249239). The archive's
+  listing shows this; the job's own report was not read, because the log, the summary, and the artifact need a
+  GitHub sign-in. The step now looks in both places, and each failed step becomes an annotation that GitHub lists
+  without a sign-in. Check A on Windows has not passed yet.

@@ -14,11 +14,12 @@ const loadReport = (): Promise<Json> => import(pathToFileURL(path.join(scripts, 
 const loadExit = (): Promise<Json> => import(pathToFileURL(path.join(scripts, 'exit.mjs')).href);
 const loadWeb = (): Promise<Json> => import(pathToFileURL(path.join(scripts, 'web.mjs')).href);
 
-// Runs `task` with console output silenced: the scripts print each step, and a FAIL line would read as a CI failure.
-async function quietly<T>(task: () => T | Promise<T>): Promise<T> {
+// Runs `task` with console output captured in `printed` instead of shown: the scripts print each step, and a FAIL
+// line, or a workflow command when GitHub Actions runs the tests, would read as a CI failure.
+async function quietly<T>(task: () => T | Promise<T>, printed: string[] = []): Promise<T> {
     const { log, error } = console;
-    console.log = () => undefined;
-    console.error = () => undefined;
+    console.log = (...values: unknown[]) => void printed.push(values.join(' '));
+    console.error = (...values: unknown[]) => void printed.push(values.join(' '));
     try {
         return await task();
     } finally {
@@ -140,17 +141,24 @@ describe('release check reports', () => {
         report.attach('Log', 'before ```` after');
         const out = fs.mkdtempSync(path.join(os.tmpdir(), 'view-patch-report-'));
         const summary = path.join(out, 'summary.md');
-        const previous = process.env.GITHUB_STEP_SUMMARY;
-        process.env.GITHUB_STEP_SUMMARY = summary;
-        try {
-            assert.equal(await quietly(() => report.write(out)), 1);
-        } finally {
-            if (previous === undefined) {
-                delete process.env.GITHUB_STEP_SUMMARY;
+        const previous = { summary: process.env.GITHUB_STEP_SUMMARY, actions: process.env.GITHUB_ACTIONS };
+        const restore = (name: string, value: string | undefined) => {
+            if (value === undefined) {
+                delete process.env[name];
             } else {
-                process.env.GITHUB_STEP_SUMMARY = previous;
+                process.env[name] = value;
             }
+        };
+        const printed: string[] = [];
+        process.env.GITHUB_STEP_SUMMARY = summary;
+        process.env.GITHUB_ACTIONS = 'true';
+        try {
+            assert.equal(await quietly(() => report.write(out), printed), 1);
+        } finally {
+            restore('GITHUB_STEP_SUMMARY', previous.summary);
+            restore('GITHUB_ACTIONS', previous.actions);
         }
+        assert.ok(printed.includes('::error title=Check X%3A 2. Throw::went wrong'), printed.join('\n'));
         const markdown = fs.readFileSync(path.join(out, 'report.md'), 'utf8');
         assert.match(markdown, /^### Check X: FAIL \(1 step failed\)$/m);
         assert.match(markdown, /^\| 1\. Copy \| PASS \| a \\\| b c \|$/m);
@@ -160,6 +168,52 @@ describe('release check reports', () => {
         assert.equal(JSON.parse(fs.readFileSync(path.join(out, 'report.json'), 'utf8')).verdict, 'fail');
         fs.rmSync(out, { recursive: true, force: true });
     });
+
+    test('annotate a failed step, escaped as a workflow command, or else the steps that did not run', async () => {
+        const { CheckReport } = await loadReport();
+        const failing = new CheckReport({ check: 'A', title: 'Check A' });
+        failing.pass('package', 'Package identity', 'fine');
+        failing.fail('editor', 'VS Code, local', 'ENOENT: no such file\n100% missing');
+        failing.notRun('1', 'Identity gate', 'there is no VS Code test instance');
+        assert.deepEqual(failing.annotations(),
+            ['::error title=Check A%3A editor. VS Code%2C local::ENOENT: no such file%0A100%25 missing']);
+        const incomplete = new CheckReport({ check: 'exit', title: 'Exit' });
+        incomplete.pass('1', 'Publish run', 'fine');
+        incomplete.notRun('2', 'Job digests', 'no token');
+        assert.deepEqual(incomplete.annotations(),
+            ['::warning title=Exit%3A 1 step not run::2. Job digests: no token']);
+        const passing = new CheckReport({ check: 'B', title: 'Check B' });
+        passing.substitute('6', 'GitHub patch', 'a copy');
+        assert.deepEqual(passing.annotations(), []);
+    });
+});
+
+describe('release check A', () => {
+    test('finds VS Code\'s files beside the executable, or in the commit-named folder of a Windows archive',
+        async () => {
+            const { vscodeAppFolder } = await import(pathToFileURL(path.join(scripts, 'hosts.mjs')).href);
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'view-patch-vscode-'));
+            const app = (...parts: string[]) => {
+                const folder = path.join(dir, ...parts, 'resources', 'app');
+                fs.mkdirSync(folder, { recursive: true });
+                fs.writeFileSync(path.join(folder, 'package.json'), '{}');
+                return folder;
+            };
+            try {
+                const executable = path.join(dir, 'Code.exe');
+                fs.mkdirSync(path.join(dir, 'bin'));
+                assert.throws(() => vscodeAppFolder(executable, 'win32'), /found 0 such folders/);
+                const versioned = app('661626d0e7');
+                assert.equal(vscodeAppFolder(executable, 'win32'), versioned);
+                app('0123456789');
+                assert.throws(() => vscodeAppFolder(executable, 'win32'), /found 2 such folders/);
+                const flat = app();
+                assert.equal(vscodeAppFolder(executable, 'win32'), flat);
+                assert.equal(vscodeAppFolder(path.join(dir, 'code'), 'linux'), flat);
+            } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+            }
+        });
 });
 
 describe('release exit verification', () => {

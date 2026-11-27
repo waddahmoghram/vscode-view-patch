@@ -32,7 +32,7 @@ import { downloadAndUnzipVSCode, resolveCliArgsFromVSCodeExecutablePath } from '
 import { readVSIXPackage } from '@vscode/vsce/out/zip.js';
 import {
     LOCAL_SSH_ALIAS, killTree, lastLines, localHost, run, runCommands, shellQuote, sshHost, startLocalSshd,
-    stopRunning,
+    stopRunning, vscodeAppFolder,
 } from './hosts.mjs';
 import { CheckReport, EXIT, STATUS_TEXT, errorText } from './report.mjs';
 
@@ -332,9 +332,7 @@ class CheckA {
                 version: this.options.vscode,
                 cachePath: path.join(root, '.vscode-test'),
             });
-            const app = process.platform === 'darwin'
-                ? path.join(path.dirname(path.dirname(executable)), 'Resources', 'app')
-                : path.join(path.dirname(executable), 'resources', 'app');
+            const app = vscodeAppFolder(executable);
             const { version } = JSON.parse(await readFile(path.join(app, 'package.json'), 'utf8'));
             const { commit } = JSON.parse(await readFile(path.join(app, 'product.json'), 'utf8'));
             // The helper also returns arguments for the shared .vscode-test profile; this run uses its own instead.

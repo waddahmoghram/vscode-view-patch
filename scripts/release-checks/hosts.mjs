@@ -3,11 +3,12 @@
 // localHost() runs POSIX shell scripts on this computer and sshHost() on an ssh host alias. The check sends both the
 // same scripts, so a local run also exercises what a Remote - SSH run sends to its host. startLocalSshd() serves CI
 // runners and local verification: a user-level sshd on 127.0.0.1 that accepts one throwaway key, with every file in
-// a private scratch folder. Neither it nor the ssh configuration it writes reads or changes ~/.ssh.
+// a private scratch folder. Neither it nor the ssh configuration it writes reads or changes ~/.ssh. vscodeAppFolder()
+// finds the files of the VS Code that the check downloads, on each platform.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
@@ -28,6 +29,31 @@ export function shellQuote(value) {
 /** The last few non-empty lines of a program's output, for an error message. */
 export function lastLines(text, count = 4) {
     return String(text ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-count).join(' / ');
+}
+
+/**
+ * The folder that holds the package.json and product.json of a downloaded VS Code, given its executable. Windows
+ * archives put it in a folder named after the first 10 characters of the commit, beside Code.exe, such as
+ * 661626d0e7/resources/app in 1.148.0 (microsoft/vscode#249239); older ones put it directly in resources/app.
+ */
+export function vscodeAppFolder(executable, platform = process.platform) {
+    const dir = path.dirname(executable);
+    if (platform === 'darwin') {
+        return path.join(path.dirname(dir), 'Resources', 'app');
+    }
+    const flat = path.join(dir, 'resources', 'app');
+    if (platform !== 'win32' || existsSync(path.join(flat, 'package.json'))) {
+        return flat;
+    }
+    const versioned = readdirSync(dir)
+        .filter(name => /^[0-9a-f]{10}$/.test(name))
+        .map(name => path.join(dir, name, 'resources', 'app'))
+        .filter(folder => existsSync(path.join(folder, 'package.json')));
+    if (versioned.length !== 1) {
+        throw new Error(`VS Code's files are in neither ${flat} nor one commit-named folder beside`
+            + ` ${path.basename(executable)}: found ${versioned.length} such folders`);
+    }
+    return versioned[0];
 }
 
 /** Stops a program that run() or the VS Code launch started, with everything it started, if any of it is left. */

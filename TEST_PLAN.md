@@ -122,7 +122,7 @@ disagree with the sources; update this plan in the same change as the tests.
 
 | Layer      | Runner                                                            | Test sources                        | Count |
 | ---------- | ----------------------------------------------------------------- | ----------------------------------- | ----: |
-| unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   393 |
+| unit       | `node:test`, `npm run test:unit`                                  | `src/test/unit/**/*.test.ts`        |   395 |
 | editor     | Mocha in VS Code, `npm run test:editor`                           | `src/test/integration/**/*.test.ts` |    64 |
 | restricted | Isolated VS Code, `npm run test:restricted`                       | `src/test/restricted/run.ts`        |     1 |
 | web        | Mocha in headless Chromium, `npm run test:web`                    | `src/test/web/suite.test.ts`        |     7 |
