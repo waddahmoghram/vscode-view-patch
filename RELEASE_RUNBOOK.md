@@ -174,7 +174,10 @@ summary, and artifact need.
   Secure Shell (SSH) server and keys made for that run, with the package installed on the remote side. Its PASS is
   check A as written. It runs only when the repository variable `VSCODE_SERVER_LICENSE` is `accepted`, because it
   installs the Remote - SSH extension and a VS Code Server ([RELEASING.md](RELEASING.md#release-check-sign-ins)).
-  It passed its first run (section 13), so a failure there fails the workflow.
+  It never fails the workflow, by the owner's choice: it depends on the newest stable VS Code, its server, and the
+  current Remote - SSH release, and a new release of any of them can break the job with no change in View Patch.
+  Its failure shows on the job and as an annotation on the run's summary page, while the run still passes, so it
+  blocks no release by itself (section 10).
 - **Check A (local test instance)** runs the same steps in a local window, on Linux and on Windows, so its report
   marks each step in the window as PASS (substitute). Of those, steps 3, 3a, 4, and 5a count, as the substitute's
   steps 3 and 4 did for 0.3.8 (section 12): they do not depend on where the extension host runs. The identity
@@ -351,6 +354,7 @@ GITHUB_TOKEN="$(gh auth token)" npm run check:exit -- --run <Publish run id>
 | The exit job fails at **Marketplace listing** | The Marketplace had not listed or validated the version within 30 minutes | Re-run the failed job later |
 | Automated check B fails step 6 with "vscode.dev is not signed in to GitHub" | The stored vscode.dev session expired or was revoked | Refresh `VSCODE_DEV_SIGN_IN_STATE` ([RELEASING.md](RELEASING.md#release-check-sign-ins)) and re-run the job, or run steps 6 and 7 by hand |
 | The job **Check A (Remote - SSH)** is skipped | The repository variable `VSCODE_SERVER_LICENSE` is not `accepted` | Run check A's remote parts by hand (section 6), or set the variable |
+| The job **Check A (Remote - SSH)** fails, but the run passes | A View Patch defect in remote windows, or a new VS Code or Remote - SSH release that broke the job, which never fails the workflow (section 6) | Read the job's annotations and report. A View Patch defect is a FAIL; otherwise run check A's remote parts by hand (section 6), and fix the job |
 
 ## 11. Release record
 
@@ -1083,3 +1087,9 @@ shipped files from the tested `429fb68` is its version.
 - Changed: a failure of the Remote - SSH job now fails the workflow (section 6). After each Publish run, every
   step of check A now runs as written, and so does every step of check B except 6 and 7 until a vscode.dev sign-in
   is stored; the screen-reader check stays manual.
+
+### 2026-11-26 - Remote - SSH check made non-blocking
+
+- Changed, by the owner's choice: the Remote - SSH job never fails the workflow, so that a new VS Code or
+  Remote - SSH release that breaks the job cannot hold up a release. This reverses the gate that the entry above
+  set after one run. Its PASS still counts as check A as written, and section 10 says what to do after a failure.

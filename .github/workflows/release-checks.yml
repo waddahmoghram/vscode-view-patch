@@ -194,6 +194,9 @@ jobs:
       ${{ !cancelled() && needs.exit.outputs.version != '' && vars.VSCODE_SERVER_LICENSE == 'accepted' &&
       (github.event_name == 'workflow_run' || inputs.checks == 'all') }}
     runs-on: ubuntu-latest
+    # Never fails the workflow, by the owner's choice: a new VS Code or Remote - SSH release can break this job with
+    # no change in View Patch. A failure shows on the job and as an annotation; see RELEASE_RUNBOOK.md section 10.
+    continue-on-error: true
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
