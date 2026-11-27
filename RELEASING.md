@@ -103,15 +103,16 @@ To run check B's steps 6 and 7 as written, which open a patch from a GitHub repo
 1. On a computer with a display, in a clone of this repository with `npm ci` done, sign in with that account once:
 
    ```bash
-   npm run check:b -- --sign-in --profile vscode-dev-profile --save-sign-in-state vscode-dev-state.json
+   npm run check:b -- --sign-in --profile .release-checks/sign-in/profile --save-sign-in-state .release-checks/sign-in/state.json
    ```
 
+   Git ignores the `.release-checks` folder, so these files, which hold the sign-in, cannot be committed by accident.
    In the browser window that opens, sign in to GitHub and allow GitHub Repositories to use the account.
    The command then saves the smallest copy of the session that still opens the patch in a new browser: first one with only vscode.dev's cookies, then one with every cookie, then the whole browser state.
-   It writes `vscode-dev-state.json` and `vscode-dev-state.json.b64`, and lists the cookie domains it kept.
-1. In **Settings** > **Secrets and variables** > **Actions** > **Secrets**, add the repository secret `VSCODE_DEV_SIGN_IN_STATE` with the contents of `vscode-dev-state.json.b64`.
-   When the command splits it into `vscode-dev-state.json.b64.1`, `.b64.2`, and so on, add those as `VSCODE_DEV_SIGN_IN_STATE`, `VSCODE_DEV_SIGN_IN_STATE_2`, and so on, up to four.
-1. Delete both files and the `vscode-dev-profile` folder.
+   It writes `state.json` and `state.json.b64` there, and lists the cookie domains it kept.
+1. In **Settings** > **Secrets and variables** > **Actions** > **Secrets**, add the repository secret `VSCODE_DEV_SIGN_IN_STATE` with the contents of `.release-checks/sign-in/state.json.b64`.
+   When the command splits it into `state.json.b64.1`, `.b64.2`, and so on, add those as `VSCODE_DEV_SIGN_IN_STATE`, `VSCODE_DEV_SIGN_IN_STATE_2`, and so on, up to four.
+1. Delete the `.release-checks/sign-in` folder.
 
 The files, the profile, and the secret hold a GitHub token for that account: anyone who reads them can act as it.
 To revoke it, open the account's **Settings** > **Applications** > **Authorized OAuth Apps**, revoke the app that the sign-in authorized, then delete the secret.

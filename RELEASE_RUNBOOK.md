@@ -245,12 +245,13 @@ review menus). Its steps 1 to 5 and 8 and the extras count as written. Steps 6 a
   a signed-in session, or with a signed-in browser profile on a workstation:
 
 ```bash
-npm run check:b -- --sign-in --profile vscode-dev-profile
-npm run check:b -- --version 0.3.9 --channel regular --profile vscode-dev-profile
+npm run check:b -- --sign-in --profile .release-checks/sign-in/profile
+npm run check:b -- --version 0.3.9 --channel regular --profile .release-checks/sign-in/profile
 ```
 
 The first command opens a browser on that profile, waits until you have signed in to GitHub there, and runs
-nothing else; later runs reuse the profile. Keep the profile folder private: it holds that GitHub sign-in.
+nothing else; later runs reuse the profile. Keep the profile folder private: it holds that GitHub sign-in. Git
+ignores `.release-checks`, so the profile cannot be committed by accident.
 
 ## 8. Cut the release
 
