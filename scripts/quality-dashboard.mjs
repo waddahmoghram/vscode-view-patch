@@ -13,7 +13,7 @@
 // values that only job logs hold (test counts and package digests) are reported as unavailable. A source that
 // fails becomes "unavailable: <reason>" instead of stopping the run.
 
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -1258,7 +1258,17 @@ async function main() {
         : `No metrics snapshot from an earlier day: ${report.trend.reason ?? `${report.trend.snapshotsRead} read`}.`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node.js loads the entry point by its real path, so compare real paths: through a symbolic link,
+// path.resolve(process.argv[1]) would not match, and the script would exit 0 without doing anything.
+function isMain() {
+    try {
+        return realpathSync(process.argv[1] ?? '') === fileURLToPath(import.meta.url);
+    } catch {
+        return false;
+    }
+}
+
+if (isMain()) {
     main().catch(error => {
         console.error(`quality-dashboard: ${error instanceof Error ? error.message : String(error)}`);
         process.exitCode = 1;

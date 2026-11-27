@@ -10,7 +10,7 @@
 // instead of being guessed. --check also confirms that each test title quoted in the plan's traceability table
 // is still defined in the file that its row cites.
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -597,6 +597,16 @@ function main(args) {
     return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node.js loads the entry point by its real path, so compare real paths: through a symbolic link,
+// path.resolve(process.argv[1]) would not match, and the script would exit 0 without doing anything.
+function isMain() {
+    try {
+        return realpathSync(process.argv[1] ?? '') === fileURLToPath(import.meta.url);
+    } catch {
+        return false;
+    }
+}
+
+if (isMain()) {
     process.exitCode = main(process.argv.slice(2));
 }

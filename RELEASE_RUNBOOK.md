@@ -1116,3 +1116,15 @@ shipped files from the tested `429fb68` is its version.
   spaces; `--version` also takes a leading `v`; with neither given, the newest successful Publish run from a tag
   push or `main` is checked (section 9). A rejected input or a crash now adds an annotation that says why, and the
   workflow's message says whether a report exists (section 10).
+
+### 2026-11-26 - Release checks passed on the exit verification fix
+
+- Run `45931656678`, started by hand on `d05163c`, passed with every job, check A in a Remote - SSH window
+  included. Its exit verification left no annotation, so every step passed, the job digests included; which values
+  the form was given is only in the job's log.
+- Run `45928606908`, described in the entry above, has since been deleted from the run list: its page returns 404,
+  and its annotations went with it.
+- Changed: `quality-dashboard.mjs`, `release-notes.mjs`, and `test-inventory.mjs` decide whether they were started
+  as a script by comparing real paths, as `exit.mjs` and `web.mjs` do. Started through a symbolic link, their old
+  comparison was false, so they exited 0 without doing anything. Unit tests start `release-notes.mjs` and
+  `test-inventory.mjs` through a linked folder; `quality-dashboard.mjs` needs the network, so it has no such test.

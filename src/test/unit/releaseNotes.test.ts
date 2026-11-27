@@ -1,5 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -115,5 +117,22 @@ describe('release notes', () => {
         assert.equal(unknown.status, 1);
         assert.equal(unknown.stdout, '');
         assert.match(unknown.stderr, /has no "## 9\.9\.9" section/);
+    });
+
+    test('prints the same notes when started through a linked folder', () => {
+        // A junction needs no extra rights on Windows; elsewhere it is an ordinary symbolic link.
+        const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'view-patch-link-'));
+        const link = path.join(folder, 'scripts');
+        fs.symlinkSync(path.dirname(script), link, 'junction');
+        try {
+            const linked = spawnSync(process.execPath, [path.join(link, 'release-notes.mjs'), '--version', '0.3.5'],
+                { encoding: 'utf8' });
+            assert.equal(linked.status, 0, linked.stderr);
+            assert.match(linked.stdout, /^- The first regular release since 0\.3\.0\./);
+            assert.equal(linked.stdout, run('--version', '0.3.5').stdout);
+        } finally {
+            fs.unlinkSync(link);
+            fs.rmdirSync(folder);
+        }
     });
 });

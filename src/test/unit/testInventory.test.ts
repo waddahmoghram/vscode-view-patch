@@ -1,4 +1,7 @@
 import * as assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -141,5 +144,22 @@ describe('test plan check', () => {
             'TEST_PLAN.md cites "finds a base", which src/test/unit/a.test.ts no longer defines.',
         ]);
         assert.match(checkPlan('# No inventory\n', sources).join('\n'), /has no <!-- test-inventory:begin -->/);
+    });
+
+    test('lists the same inventory when started through a linked folder', () => {
+        // A junction needs no extra rights on Windows; elsewhere it is an ordinary symbolic link.
+        const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'view-patch-link-'));
+        const link = path.join(folder, 'scripts');
+        fs.symlinkSync(path.dirname(script), link, 'junction');
+        try {
+            const list = (entry: string) => spawnSync(process.execPath, [entry, '--list'], { encoding: 'utf8' });
+            const linked = list(path.join(link, 'test-inventory.mjs'));
+            assert.equal(linked.status, 0, linked.stderr);
+            assert.ok(linked.stdout.length > 0, 'the linked start printed nothing');
+            assert.equal(linked.stdout, list(script).stdout);
+        } finally {
+            fs.unlinkSync(link);
+            fs.rmdirSync(folder);
+        }
     });
 });

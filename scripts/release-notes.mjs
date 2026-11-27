@@ -7,7 +7,7 @@
 // links the Marketplace listing and, given --sha256, names the package digest. A missing or empty section is an
 // error, so publishing can stop on it.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -108,7 +108,17 @@ function main() {
     process.stdout.write(releaseNotes({ changelog, version, tag: values.tag, sha256: values.sha256 }));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node.js loads the entry point by its real path, so compare real paths: through a symbolic link,
+// path.resolve(process.argv[1]) would not match, and the script would exit 0 without doing anything.
+function isMain() {
+    try {
+        return realpathSync(process.argv[1] ?? '') === fileURLToPath(import.meta.url);
+    } catch {
+        return false;
+    }
+}
+
+if (isMain()) {
     try {
         main();
     } catch (error) {
