@@ -174,13 +174,14 @@ summary, and artifact need.
   Secure Shell (SSH) server and keys made for that run, with the package installed on the remote side. Its PASS is
   check A as written. It runs only when the repository variable `VSCODE_SERVER_LICENSE` is `accepted`, because it
   installs the Remote - SSH extension and a VS Code Server ([RELEASING.md](RELEASING.md#release-check-sign-ins)).
+  It has not run yet, so until it passes once, its failure does not fail the workflow.
 - **Check A (local test instance)** runs the same steps in a local window, on Linux and on Windows, so its report
   marks each step in the window as PASS (substitute). Of those, steps 3, 3a, 4, and 5a count, as the substitute's
   steps 3 and 4 did for 0.3.8 (section 12): they do not depend on where the extension host runs. The identity
   gate, the title, and steps 2 and 5 still need a real remote window: the Remote - SSH job, or a person following
   this section, with its preflight and after-check. On Windows, step 1a also shows a local window's title,
-  `v<version> · local Windows`. That job's first run failed before VS Code started (section 13), so until it passes
-  once, its failure does not fail the workflow.
+  `v<version> · local Windows`. The Windows job failed on its first run and passed on its second (section 13), so
+  a failure there now fails the workflow, as on Linux.
 
 To run it on a workstation, from a clone with `npm ci` done (on Linux without a display, prefix `xvfb-run -a`):
 
@@ -1063,3 +1064,11 @@ shipped files from the tested `429fb68` is its version.
   listing shows this; the job's own report was not read, because the log, the summary, and the artifact need a
   GitHub sign-in. The step now looks in both places, and each failed step becomes an annotation that GitHub lists
   without a sign-in. Check A on Windows has not passed yet.
+
+### 2026-11-26 - Check A passed on Windows
+
+- Run `45921139522`, started by hand on `cf79fca` for Publish run `45899132142`, passed with every job, check A on
+  Windows included. No job has an annotation, so no step failed or was left not run. The Remote - SSH job was
+  skipped, because the repository variable `VSCODE_SERVER_LICENSE` is not set.
+- Changed: a failure of check A on Windows now fails the workflow. The Remote - SSH job, which has not run yet,
+  takes over the rule that a job's failure does not fail the workflow until it passes once (section 6).

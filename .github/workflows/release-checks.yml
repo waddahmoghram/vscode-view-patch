@@ -157,8 +157,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The Windows leg has not run yet. Until it passes once, its failure shows on the job but not the workflow.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     timeout-minutes: 30
     env:
       VERSION: ${{ needs.exit.outputs.version }}
@@ -196,6 +194,8 @@ jobs:
       ${{ !cancelled() && needs.exit.outputs.version != '' && vars.VSCODE_SERVER_LICENSE == 'accepted' &&
       (github.event_name == 'workflow_run' || inputs.checks == 'all') }}
     runs-on: ubuntu-latest
+    # This job has not run yet. Until it passes once, its failure shows on the job but not the workflow.
+    continue-on-error: true
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
